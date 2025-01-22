@@ -1,11 +1,16 @@
+import datetime
+import json
+
 import pytest
-from django.core.cache import cache
+from django.core.cache import caches
 from django.core.management import call_command
 from django.test import TestCase
+from freezegun import freeze_time
 from rest_framework.response import Response
 from rest_framework.test import APIClient, APIRequestFactory
 
 from peeringdb_server import models
+from peeringdb_server import settings as pdb_settings
 from peeringdb_server.rest import ModelViewSet
 from peeringdb_server.rest_throttles import (
     APIAnonUserThrottle,
@@ -13,6 +18,8 @@ from peeringdb_server.rest_throttles import (
     MelissaThrottle,
     ResponseSizeThrottle,
 )
+
+from .util import mock_csrf_session
 
 
 class MockView(ModelViewSet):
@@ -38,7 +45,6 @@ class MelissaMockView(ModelViewSet):
 
 
 class ResponseSizeMockView(ModelViewSet):
-
     """
     Dummy view for testing thorttling based on expected response size (#1126)
     """
@@ -63,7 +69,8 @@ class APIThrottleTests(TestCase):
         """
         Reset the cache so that no throttles will be active
         """
-        cache.clear()
+        caches["default"].clear()
+        caches["negative"].clear()
 
         self.factory = APIRequestFactory()
         self.rate_anon = env = models.EnvironmentSetting(
@@ -85,6 +92,16 @@ class APIThrottleTests(TestCase):
         )
         env.save()
 
+        env = models.EnvironmentSetting(
+            setting="API_THROTTLE_RATE_WRITE", value_str="2/minute"
+        )
+        env.save()
+
+        self.superuser = models.User.objects.create_user(
+            "su", "neteng@20c.com", "su", is_superuser=True
+        )
+        self.org = models.REFTAG_MAP["org"].objects.create(name="Test Org", status="ok")
+
     def test_environment_throttle_setting(self):
         """
         Test if default throttle settings are overridden by environment settings
@@ -105,12 +122,17 @@ class APIThrottleTests(TestCase):
             models.EnvironmentSetting.get_setting_value("API_THROTTLE_RATE_USER_MSG")
             == "Rate limit exceeded (user)"
         )
+        assert (
+            models.EnvironmentSetting.get_setting_value("API_THROTTLE_RATE_WRITE")
+            == "2/minute"
+        )
 
     def test_anon_requests_below_throttle_rate(self):
         """
         Test if request rate is limited for anonymous users
         """
         request = self.factory.get("/")
+        mock_csrf_session(request)
         for dummy in range(10):
             response = MockView.as_view({"get": "get"})(request)
         assert response.status_code == 200
@@ -123,6 +145,7 @@ class APIThrottleTests(TestCase):
         user = models.User(username="test")
         user.save()
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.user = user
         for dummy in range(10):
             response = MockView.as_view({"get": "get"})(request)
@@ -136,6 +159,7 @@ class APIThrottleTests(TestCase):
         user = models.User(username="test", is_superuser=True)
         user.save()
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.user = user
         for dummy in range(20):
             response = MockView.as_view({"get": "get"})(request)
@@ -147,6 +171,7 @@ class APIThrottleTests(TestCase):
         """
 
         request = self.factory.get("/")
+        mock_csrf_session(request)
         for dummy in range(11):
             response = MockView.as_view({"get": "get"})(request)
         assert response.status_code == 429
@@ -159,6 +184,7 @@ class APIThrottleTests(TestCase):
         """
 
         request = self.factory.get("/")
+        mock_csrf_session(request)
         for dummy in range(11):
             response = MockView.as_view({"get": "get"})(request)
         assert response.status_code == 429
@@ -218,6 +244,7 @@ class APIThrottleTests(TestCase):
         user = models.User(username="test")
         user.save()
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.user = user
         for dummy in range(11):
             response = MockView.as_view({"get": "get"})(request)
@@ -232,6 +259,7 @@ class APIThrottleTests(TestCase):
         user = models.User(username="test")
         user.save()
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.user = user
         for dummy in range(11):
             response = MockView.as_view({"get": "get"})(request)
@@ -291,6 +319,7 @@ class APIThrottleTests(TestCase):
         """
 
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.META.update({"REMOTE_ADDR": "10.10.10.10"})
 
         # by default ip-block response size rate limiting is disabled
@@ -304,13 +333,13 @@ class APIThrottleTests(TestCase):
         # for ip blocks
 
         thold = models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_THRESHOLD_CIDR", value_int=500
+            setting="API_THROTTLE_REPEATED_REQUEST_THRESHOLD_CIDR", value_int=500
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_RATE_CIDR", value_str="3/minute"
+            setting="API_THROTTLE_REPEATED_REQUEST_RATE_CIDR", value_str="3/minute"
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_ENABLED_CIDR", value_bool=True
+            setting="API_THROTTLE_REPEATED_REQUEST_ENABLED_CIDR", value_bool=True
         )
 
         # ip 10.10.10.10 requesting 3 times (all should be ok)
@@ -349,6 +378,7 @@ class APIThrottleTests(TestCase):
         """
 
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.META.update({"HTTP_X_FORWARDED_FOR": "10.10.10.10,77.77.77.77"})
 
         # by default ip-block response size rate limiting is disabled
@@ -362,13 +392,13 @@ class APIThrottleTests(TestCase):
         # for ip blocks
 
         thold = models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_THRESHOLD_CIDR", value_int=500
+            setting="API_THROTTLE_REPEATED_REQUEST_THRESHOLD_CIDR", value_int=500
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_RATE_CIDR", value_str="3/minute"
+            setting="API_THROTTLE_REPEATED_REQUEST_RATE_CIDR", value_str="3/minute"
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_ENABLED_CIDR", value_bool=True
+            setting="API_THROTTLE_REPEATED_REQUEST_ENABLED_CIDR", value_bool=True
         )
 
         # ip 10.10.10.10 requesting 3 times (all should be ok)
@@ -407,6 +437,7 @@ class APIThrottleTests(TestCase):
         """
 
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.META.update({"REMOTE_ADDR": "10.10.10.10"})
 
         # by default ip-address response size rate limiting is disabled
@@ -420,13 +451,13 @@ class APIThrottleTests(TestCase):
         # for ip addresses
 
         thold = models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_THRESHOLD_IP", value_int=500
+            setting="API_THROTTLE_REPEATED_REQUEST_THRESHOLD_IP", value_int=500
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_RATE_IP", value_str="3/minute"
+            setting="API_THROTTLE_REPEATED_REQUEST_RATE_IP", value_str="3/minute"
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_ENABLED_IP", value_bool=True
+            setting="API_THROTTLE_REPEATED_REQUEST_ENABLED_IP", value_bool=True
         )
 
         # ip 10.10.10.10 requesting 3 times (all should be ok)
@@ -464,9 +495,12 @@ class APIThrottleTests(TestCase):
         for authenticated users
         """
 
-        user = models.User.objects.create_user(username="test")
-        user_b = models.User.objects.create_user(username="test_2")
+        user = models.User.objects.create_user(username="test", email="test@localhost")
+        user_b = models.User.objects.create_user(
+            username="test_2", email="test_2@localhost"
+        )
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.user = user
 
         # by default user response size rate limiting is disabled
@@ -480,13 +514,13 @@ class APIThrottleTests(TestCase):
         # for ip addresses
 
         thold = models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_THRESHOLD_USER", value_int=500
+            setting="API_THROTTLE_REPEATED_REQUEST_THRESHOLD_USER", value_int=500
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_RATE_USER", value_str="3/minute"
+            setting="API_THROTTLE_REPEATED_REQUEST_RATE_USER", value_str="3/minute"
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_ENABLED_USER", value_bool=True
+            setting="API_THROTTLE_REPEATED_REQUEST_ENABLED_USER", value_bool=True
         )
 
         # user requesting 3 times (all should be ok)
@@ -520,16 +554,17 @@ class APIThrottleTests(TestCase):
 
         user = models.User.objects.create_user(username="test", is_superuser=True)
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.user = user
 
         thold = models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_THRESHOLD_USER", value_int=500
+            setting="API_THROTTLE_REPEATED_REQUEST_THRESHOLD_USER", value_int=500
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_RATE_USER", value_str="3/minute"
+            setting="API_THROTTLE_REPEATED_REQUEST_RATE_USER", value_str="3/minute"
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_ENABLED_USER", value_bool=True
+            setting="API_THROTTLE_REPEATED_REQUEST_ENABLED_USER", value_bool=True
         )
 
         # no throttling since user is admin
@@ -555,6 +590,7 @@ class APIThrottleTests(TestCase):
         )
 
         request = self.factory.get("/")
+        mock_csrf_session(request)
         request.META["HTTP_AUTHORIZATION"] = f"Api-Key {key}"
 
         # by default user response size rate limiting is disabled
@@ -568,13 +604,13 @@ class APIThrottleTests(TestCase):
         # for ip addresses
 
         thold = models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_THRESHOLD_ORG", value_int=500
+            setting="API_THROTTLE_REPEATED_REQUEST_THRESHOLD_ORG", value_int=500
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_RATE_ORG", value_str="3/minute"
+            setting="API_THROTTLE_REPEATED_REQUEST_RATE_ORG", value_str="3/minute"
         )
         models.EnvironmentSetting.objects.create(
-            setting="API_THROTTLE_RESPONSE_SIZE_ENABLED_ORG", value_bool=True
+            setting="API_THROTTLE_REPEATED_REQUEST_ENABLED_ORG", value_bool=True
         )
 
         # requesting 3 times (all should be ok)
@@ -608,6 +644,7 @@ class APIThrottleTests(TestCase):
         """
 
         request = self.factory.get("/api/fac", {"country": "US", "state": "IL"})
+        mock_csrf_session(request)
         request.META.update({"REMOTE_ADDR": "10.10.10.10"})
 
         # by default melissa rate limiting is disabled
@@ -647,9 +684,12 @@ class APIThrottleTests(TestCase):
         for authenticated users
         """
 
-        user = models.User.objects.create_user(username="test")
-        user_b = models.User.objects.create_user(username="test_2")
+        user = models.User.objects.create_user(username="test", email="test@localhost")
+        user_b = models.User.objects.create_user(
+            username="test_2", email="test_2@localhost"
+        )
         request = self.factory.get("/api/fac", {"country": "US", "state": "IL"})
+        mock_csrf_session(request)
         request.user = user
 
         # by default melissa rate limiting is disabled
@@ -689,9 +729,14 @@ class APIThrottleTests(TestCase):
         for authenticated users with admin status
         """
 
-        user = models.User.objects.create_user(username="test", is_superuser=True)
-        user_b = models.User.objects.create_user(username="test_2", is_superuser=True)
+        user = models.User.objects.create_user(
+            username="test", email="test@localhost", is_superuser=True
+        )
+        user_b = models.User.objects.create_user(
+            username="test_2", email="test_2@localhost", is_superuser=True
+        )
         request = self.factory.get("/api/fac", {"country": "US", "state": "IL"})
+        mock_csrf_session(request)
         request.user = user
 
         # by default melissa rate limiting is disabled
@@ -751,6 +796,7 @@ class APIThrottleTests(TestCase):
         )
 
         request = self.factory.get("/api/fac", {"country": "US", "state": "IL"})
+        mock_csrf_session(request)
         request.META["HTTP_AUTHORIZATION"] = f"Api-Key {key}"
 
         # by default melissa rate limiting is disabled
@@ -783,3 +829,45 @@ class APIThrottleTests(TestCase):
         request.META.update(HTTP_AUTHORIZATION=f"Api-Key {key_b}")
         response = MelissaMockView.as_view({"get": "get"})(request)
         assert response.status_code == 200
+
+    def test_post_ratelimit(self):
+        try:
+            pdb_settings.TUTORIAL_MODE = True
+            client = APIClient()
+            client.force_authenticate(self.superuser)
+            net = models.Network.objects.create(name="test", org=self.org, asn=9999999)
+            for i in range(1, 5):
+                # max post 2/minute
+                r = client.post(
+                    "/api/net",
+                    {
+                        "org_id": self.org.pk,
+                        "name": f"Test net {i}",
+                        "asn": 64496 + i,
+                        "website": f"https://www.example{i}.com",
+                    },
+                    format="json",
+                )
+                content = json.loads(r.content)
+                if i <= 2:
+                    assert r.status_code == 201
+                else:
+                    # Block by django-ratelimit
+                    assert content["meta"]["error"] == "Too Many Requests"
+                    assert r.status_code == 429
+
+            with freeze_time(datetime.datetime.now() + datetime.timedelta(minutes=1)):
+                # Jump 1 minute for the block from django ratelimit to end
+                r = client.post(
+                    "/api/net",
+                    {
+                        "org_id": self.org.pk,
+                        "name": "Test net",
+                        "asn": 64496,
+                        "website": "https://www.example.com",
+                    },
+                    format="json",
+                )
+                assert r.status_code == 201
+        finally:
+            pdb_settings.TUTORIAL_MODE = False

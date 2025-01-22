@@ -1,5 +1,10 @@
-fac: 4
+fac: 10
 ix: 4
 net: 4
-org: 7
+org: 8
+carrier: 4
+campus: 3
+netixlan: 3
+netfac: 3
+automated_nets: 4
 users: 4

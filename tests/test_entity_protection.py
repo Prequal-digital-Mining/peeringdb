@@ -39,6 +39,8 @@ def test_protected_entities(db):
     assert org.ix_set_active.exists()
     assert org.fac_set_active.exists()
     assert org.net_set_active.exists()
+    assert org.carrier_set_active.exists()
+    # assert org.campus_set_active.exists()
 
     # org has ix, net and fac under it, and should not be
     # deletable
@@ -49,7 +51,6 @@ def test_protected_entities(db):
     # and checking their protected status as well
 
     for ix in org.ix_set.all():
-
         assert ix.ixlan.ixpfx_set.exists()
         assert ix.ixlan.netixlan_set.exists()
         assert ix.ixfac_set.exists()
@@ -64,27 +65,11 @@ def test_protected_entities(db):
         for ixfac in ix.ixfac_set.all():
             ixfac.delete()
 
-        # process the prefixes under the exchange
-
-        for ixpfx in ix.ixlan.ixpfx_set.all():
-
-            # exchange has netixlans under it that fall
-            # into the address space for the prefix so
-            # the prefix is currently not deletable
-
-            assert_protected(ixpfx)
-
         # process the netixlans under the exchange and
         # delete them
 
         for netixlan in ix.ixlan.netixlan_set.all():
             netixlan.delete()
-
-        # with the netixlans gone, the prefixes can now
-        # be deleted
-
-        for ixpfx in ix.ixlan.ixpfx_set.all():
-            ixpfx.delete()
 
         # with netixlans gone the exchange can now be
         # deleted
@@ -125,6 +110,26 @@ def test_protected_entities(db):
         # facility can now be deleted
 
         fac.delete()
+
+    # org still has active net objects under it
+    # and should not be deletable
+
+    assert_protected(org)
+
+    # delete carriers
+
+    for carrier in org.carrier_set.all():
+        carrier.delete()
+
+    # org still has active net objects under it
+    # and should not be deletable
+
+    assert_protected(org)
+
+    # delete campuses
+
+    for campus in org.campus_set.all():
+        campus.delete()
 
     # org still has active net objects under it
     # and should not be deletable
@@ -217,7 +222,6 @@ def test_tech_poc_hard_delete_1013(role):
 
 @pytest.mark.django_db
 def test_org_protection_sponsor(db):
-
     """
     test that organization cannot be deleted if it has
     an active sponsorship going

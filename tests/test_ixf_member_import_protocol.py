@@ -149,6 +149,517 @@ def test_resolve_local_ixf(entities, use_ip, save):
 
 
 @pytest.mark.django_db
+def test_resolve_local_ixf_stale_netixlan(entities, use_ip, save):
+    """
+    Netixlan exists, remote data does not match the netixlan, and there is a local-ixf
+    entry that also matches all the data.
+
+    The local-ixf entry is past the allowed proposal age, so both it and the
+    netixlan should be deleted.
+    """
+    data = setup_test_data("ixf.member.7")
+    network = entities["net"]["UPDATE_DISABLED_2"]
+    network_o = entities["net"]["UPDATE_ENABLED"]
+
+    ixlan = entities["ixlan"][0]
+    ixlan.ixf_ixp_import_enabled = True
+
+    netixlan = NetworkIXLan.objects.create(
+        network=network,
+        ixlan=ixlan,
+        asn=network.asn,
+        speed=10000,
+        ipaddr4=use_ip(4, "195.69.147.250"),
+        ipaddr6=use_ip(6, "2001:7f8:1::a500:2906:1"),
+        status="ok",
+        is_rs_peer=True,
+        operational=True,
+    )
+
+    entities["netixlan"].append(netixlan)
+
+    # Create a local IXF that matches remote details
+    ixm = IXFMemberData.objects.create(
+        asn=network.asn,
+        ipaddr4=use_ip(4, "195.69.147.250"),
+        ipaddr6=use_ip(6, "2001:7f8:1::a500:2906:1"),
+        ixlan=ixlan,
+        speed=10000,
+        fetched=datetime.datetime.now(datetime.timezone.utc),
+        operational=True,
+        is_rs_peer=True,
+        status="ok",
+        data="{}",
+        extra_notifications_net_num=0,
+        extra_notifications_net_date=None,
+    )
+
+    assert IXFMemberData.objects.count() == 1
+
+    ixm.created = ixm.created - datetime.timedelta(
+        days=settings.IXF_REMOVE_STALE_NETIXLAN_PERIOD + 1
+    )
+    ixm.save()
+
+    assert ixm.action == "delete"
+
+    importer = ixf.Importer()
+
+    if not save:
+        return assert_idempotent(importer, ixlan, data, save=False)
+
+    # first update should not remove the netixlan or IX-F entry
+    # since the notification count requirement is not met
+
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    assert IXFMemberData.objects.count() == 1
+
+    netixlan.refresh_from_db()
+    assert netixlan.status == "ok"
+
+    # ixf member data entry should have logged one notification
+    # to the network.
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 1
+    assert ixm.extra_notifications_net_date is not None
+
+    if not network_o.ipv4_support or not network_o.ipv6_support:
+        # this initial ixf import will send two additional emails (one to the net, one to the ix)
+        # due to protocol mismatch which we need to account for here - this is due to the test
+        # data which is not otherwise relevant to this test, but
+        # needs to be there for the IX-F import to be valid
+        #
+        # then we also expect one re-notificaiton email about the stale network
+
+        assert IXFImportEmail.objects.count() == 3
+    else:
+        # otherwise expect one re-notification email about the stale network
+
+        assert IXFImportEmail.objects.count() == 1
+
+    # now notification count rquirement is set to the required amount
+    # stale netixlan and IX-F entry should be removed
+
+    ixm.extra_notifications_net_num = settings.IXF_REMOVE_STALE_NETIXLAN_NOTIFY_COUNT
+    ixm.save()
+
+    # reset emails...
+    IXFImportEmail.objects.all().delete()
+
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    assert IXFMemberData.objects.count() == 0
+    assert IXFImportEmail.objects.count() == 0
+
+    netixlan.refresh_from_db()
+    assert netixlan.status == "deleted"
+
+    # Test idempotent
+
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+    assert_idempotent(importer, ixlan, data)
+
+
+@pytest.mark.django_db
+def test_resolve_local_ixf_stale_netixlan_import_disabled(entities, use_ip, save):
+    """
+    Netixlan exists, remote data does not match the netixlan, and there is a local-ixf
+    entry that also matches all the data.
+
+    The local-ixf entry is past the allowed proposal age, but the exchange has disabled
+    the importer, so nothing should happen.
+    """
+    data = setup_test_data("ixf.member.7")
+    network = entities["net"]["UPDATE_DISABLED_2"]
+    network_o = entities["net"]["UPDATE_ENABLED"]
+
+    ixlan = entities["ixlan"][0]
+    ixlan.ixf_ixp_import_enabled = True
+
+    netixlan = NetworkIXLan.objects.create(
+        network=network,
+        ixlan=ixlan,
+        asn=network.asn,
+        speed=10000,
+        ipaddr4=use_ip(4, "195.69.147.250"),
+        ipaddr6=use_ip(6, "2001:7f8:1::a500:2906:1"),
+        status="ok",
+        is_rs_peer=True,
+        operational=True,
+    )
+
+    entities["netixlan"].append(netixlan)
+
+    # Create a local IXF that matches remote details
+    ixm = IXFMemberData.objects.create(
+        asn=network.asn,
+        ipaddr4=use_ip(4, "195.69.147.250"),
+        ipaddr6=use_ip(6, "2001:7f8:1::a500:2906:1"),
+        ixlan=ixlan,
+        speed=10000,
+        fetched=datetime.datetime.now(datetime.timezone.utc),
+        operational=True,
+        is_rs_peer=True,
+        status="ok",
+        data="{}",
+        extra_notifications_net_num=0,
+        extra_notifications_net_date=None,
+    )
+
+    assert IXFMemberData.objects.count() == 1
+
+    ixm.created = ixm.created - datetime.timedelta(
+        days=settings.IXF_REMOVE_STALE_NETIXLAN_PERIOD + 1
+    )
+    ixm.save()
+
+    assert ixm.action == "delete"
+
+    importer = ixf.Importer()
+
+    if not save:
+        return assert_idempotent(importer, ixlan, data, save=False)
+
+    # first update should not remove the netixlan or IX-F entry
+    # since the notification count requirement is not met
+
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    assert IXFMemberData.objects.count() == 1
+
+    netixlan.refresh_from_db()
+    assert netixlan.status == "ok"
+
+    # ixf member data entry should have logged one notification
+    # to the network.
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 1
+    assert ixm.extra_notifications_net_date is not None
+
+    if not network_o.ipv4_support or not network_o.ipv6_support:
+        # this initial ixf import will send two additional emails (one to the net, one to the ix)
+        # due to protocol mismatch which we need to account for here - this is due to the test
+        # data which is not otherwise relevant to this test, but
+        # needs to be there for the IX-F import to be valid
+        #
+        # then we also expect one re-notificaiton email about the stale network
+
+        assert IXFImportEmail.objects.count() == 3
+    else:
+        # otherwise expect one re-notification email about the stale network
+
+        assert IXFImportEmail.objects.count() == 1
+
+    # now notification count rquirement is set to the required amount
+    # however internet exchange has disabled import, so nothing should get deleted
+
+    ixm.extra_notifications_net_num = settings.IXF_REMOVE_STALE_NETIXLAN_NOTIFY_COUNT
+    ixm.save()
+
+    # reset emails...
+    IXFImportEmail.objects.all().delete()
+
+    # disable ixf import
+    ixlan.ixf_ixp_import_enabled = False
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    assert IXFMemberData.objects.count() == 1
+    assert IXFImportEmail.objects.count() == 0
+
+    netixlan.refresh_from_db()
+    assert netixlan.status == "ok"
+
+    # Test idempotent
+
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+    assert_idempotent(importer, ixlan, data)
+
+
+@override_settings(IXF_REMOVE_STALE_NETIXLAN=False)
+@pytest.mark.django_db
+def test_resolve_local_ixf_stale_netixlan_removal_disabled(entities, save):
+    """
+    Netixlan exists, remote data does not match the netixlan, and there is a local-ixf
+    entry that also matches all the data.
+
+    The local-ixf entry is past the allowed proposal age, but IXF_REMOVE_STALE_NETIXLAN
+    is disabled, nothing should be deleted.
+    """
+
+    data = setup_test_data("ixf.member.7")
+    network = entities["net"]["UPDATE_DISABLED_2"]
+    network_o = entities["net"]["UPDATE_ENABLED"]
+
+    ixlan = entities["ixlan"][0]
+    ixlan.ixf_ixp_import_enabled = True
+
+    netixlan = NetworkIXLan.objects.create(
+        network=network,
+        ixlan=ixlan,
+        asn=network.asn,
+        speed=10000,
+        ipaddr4="195.69.147.250",
+        ipaddr6="2001:7f8:1::a500:2906:1",
+        status="ok",
+        is_rs_peer=True,
+        operational=True,
+    )
+
+    entities["netixlan"].append(netixlan)
+
+    # Create a local IXF that matches remote details
+    ixm = IXFMemberData.objects.create(
+        asn=network.asn,
+        ipaddr4="195.69.147.250",
+        ipaddr6="2001:7f8:1::a500:2906:1",
+        ixlan=ixlan,
+        speed=10000,
+        fetched=datetime.datetime.now(datetime.timezone.utc),
+        operational=True,
+        is_rs_peer=True,
+        status="ok",
+        data="{}",
+        extra_notifications_net_num=settings.IXF_REMOVE_STALE_NETIXLAN_NOTIFY_COUNT,
+    )
+
+    assert IXFMemberData.objects.count() == 1
+
+    ixm.created = ixm.created - datetime.timedelta(
+        days=settings.IXF_REMOVE_STALE_NETIXLAN_PERIOD + 1
+    )
+    ixm.save()
+
+    assert ixm.action == "delete"
+
+    importer = ixf.Importer()
+
+    if not save:
+        return assert_idempotent(importer, ixlan, data, save=False)
+
+    # first update should not remove the netixlan or IX-F entry
+
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    assert IXFMemberData.objects.count() == 1
+
+    netixlan.refresh_from_db()
+    assert netixlan.status == "ok"
+
+
+@override_settings(
+    IXF_REMOVE_STALE_NETIXLAN_NOTIFY_PERIOD=10,
+    IXF_REMOVE_STALE_NETIXLAN_NOTIFY_COUNT=2,
+    IXF_REMOVE_STALE_NETIXLAN=True,
+)
+@pytest.mark.django_db
+def test_resolve_local_ixf_stale_netixlan_renotification(entities, save):
+    """
+    Netixlan exists, remote data does not match the netixlan, and there is a local-ixf
+    entry that also matches all the data.
+
+    Test the re-notification process to the network for its stale netixlan entries.
+    """
+
+    data = setup_test_data("ixf.member.7")
+    network = entities["net"]["UPDATE_DISABLED_2"]
+    ixlan = entities["ixlan"][0]
+    ixlan.ixf_ixp_import_enabled = True
+
+    netixlan = NetworkIXLan.objects.create(
+        network=network,
+        ixlan=ixlan,
+        asn=network.asn,
+        speed=10000,
+        ipaddr4="195.69.147.250",
+        ipaddr6="2001:7f8:1::a500:2906:1",
+        status="ok",
+        is_rs_peer=True,
+        operational=True,
+    )
+
+    entities["netixlan"].append(netixlan)
+
+    # Create a local IXF that matches remote details
+    ixm = IXFMemberData.objects.create(
+        asn=network.asn,
+        ipaddr4="195.69.147.250",
+        ipaddr6="2001:7f8:1::a500:2906:1",
+        ixlan=ixlan,
+        speed=10000,
+        fetched=datetime.datetime.now(datetime.timezone.utc),
+        operational=True,
+        is_rs_peer=True,
+        status="ok",
+        data="{}",
+    )
+
+    assert IXFMemberData.objects.count() == 1
+
+    importer = ixf.Importer()
+
+    # first importer run, no re-notification
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 0
+
+    # second importer run, firstre-notification after moving the date back
+
+    ixm.created = ixm.created - datetime.timedelta(
+        days=settings.IXF_REMOVE_STALE_NETIXLAN_NOTIFY_PERIOD + 1
+    )
+    print("CREATED", ixm.created)
+    ixm.save()
+
+    IXFImportEmail.objects.all().delete()
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 1
+
+    # third importer run, no re-notification, not enough time has passed
+    # between last re-notification and now
+
+    IXFImportEmail.objects.all().delete()
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 1
+
+    # fourth importer run, set the notification date back to the past, causing
+    # the next notification to be sent
+
+    ixm.extra_notifications_net_date = (
+        ixm.extra_notifications_net_date
+        - datetime.timedelta(days=settings.IXF_REMOVE_STALE_NETIXLAN_NOTIFY_PERIOD + 1)
+    )
+    ixm.save()
+
+    IXFImportEmail.objects.all().delete()
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 2
+
+    # fifth importer run, set the notification date back to the past, but
+    # since max notification limit has been reached, no notification is sent
+
+    ixm.extra_notifications_net_date = (
+        ixm.extra_notifications_net_date
+        - datetime.timedelta(days=settings.IXF_REMOVE_STALE_NETIXLAN_NOTIFY_PERIOD + 1)
+    )
+    ixm.save()
+
+    IXFImportEmail.objects.all().delete()
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 2
+
+
+@override_settings(
+    IXF_REMOVE_STALE_NETIXLAN_NOTIFY_PERIOD=10,
+    IXF_REMOVE_STALE_NETIXLAN_NOTIFY_COUNT=2,
+    IXF_REMOVE_STALE_NETIXLAN=True,
+)
+@pytest.mark.django_db
+def test_resolve_local_ixf_stale_netixlan_renotification_import_disabled(
+    entities, save
+):
+    """
+    Netixlan exists, remote data does not match the netixlan, and there is a local-ixf
+    entry that also matches all the data.
+
+    Exchange has currently disabled the importer, so no notifications should be sent
+    #1360
+    """
+
+    data = setup_test_data("ixf.member.7")
+    network = entities["net"]["UPDATE_DISABLED_2"]
+    ixlan = entities["ixlan"][0]
+    ixlan.ixf_ixp_import_enabled = False
+
+    netixlan = NetworkIXLan.objects.create(
+        network=network,
+        ixlan=ixlan,
+        asn=network.asn,
+        speed=10000,
+        ipaddr4="195.69.147.250",
+        ipaddr6="2001:7f8:1::a500:2906:1",
+        status="ok",
+        is_rs_peer=True,
+        operational=True,
+    )
+
+    entities["netixlan"].append(netixlan)
+
+    # Create a local IXF that matches remote details
+    ixm = IXFMemberData.objects.create(
+        asn=network.asn,
+        ipaddr4="195.69.147.250",
+        ipaddr6="2001:7f8:1::a500:2906:1",
+        ixlan=ixlan,
+        speed=10000,
+        fetched=datetime.datetime.now(datetime.timezone.utc),
+        operational=True,
+        is_rs_peer=True,
+        status="ok",
+        data="{}",
+    )
+
+    assert IXFMemberData.objects.count() == 1
+
+    importer = ixf.Importer()
+
+    # first importer run, no re-notification
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 0
+
+    # second importer run, first re-notification after moving the date back
+    # however import is disabled, so no notification should be sent
+
+    ixm.created = ixm.created - datetime.timedelta(
+        days=settings.IXF_REMOVE_STALE_NETIXLAN_NOTIFY_PERIOD + 1
+    )
+    ixm.save()
+
+    IXFImportEmail.objects.all().delete()
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 0
+
+    # third importer run, no re-notification, not enough time has passed
+    # between last re-notification and now
+
+    IXFImportEmail.objects.all().delete()
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    ixm.refresh_from_db()
+    assert ixm.extra_notifications_net_num == 0
+
+
+@pytest.mark.django_db
 def test_update_data_attributes(entities, use_ip, save):
     """
     The NetIXLan differs from the remote data, but allow_ixp_update is enabled
@@ -192,7 +703,6 @@ def test_update_data_attributes(entities, use_ip, save):
     if (network.ipv4_support and not use_ip(4)) or (
         network.ipv6_support and not use_ip(6)
     ):
-
         # test (delete+add) consolidation (#770)
 
         assert len(importer.log["data"]) == 2
@@ -202,7 +712,6 @@ def test_update_data_attributes(entities, use_ip, save):
         assert log_add["action"] == "add"
 
     else:
-
         # test modify
         assert len(importer.log["data"]) == 1
         log = importer.log["data"][0]
@@ -346,7 +855,6 @@ def test_suggest_modify_local_ixf(entities, use_ip, save):
     if (network.ipv4_support and not network.ipv6_support and not use_ip(4)) or (
         network.ipv6_support and not network.ipv4_support and not use_ip(6)
     ):
-
         # edge case where network has the one ip set that
         # its not supporting and the other ip nto set at all
         # (see #771 and #770) and the existing suggestion was for
@@ -380,8 +888,7 @@ def test_suggest_modify_local_ixf(entities, use_ip, save):
     elif (network.ipv4_support and network.ipv6_support and not use_ip(4)) or (
         network.ipv6_support and network.ipv4_support and not use_ip(6)
     ):
-
-        # network supports both protocols, old ix-f data only has one
+        # network supports both protocols, old IX-F data only has one
         # of the ips set, suggest adding the other
         # #770 #771
 
@@ -405,7 +912,6 @@ def test_suggest_modify_local_ixf(entities, use_ip, save):
         assert ixf_member_data_delete.requirement_of == ixf_member_data_modify
 
     else:
-
         assert_no_emails(network, ixlan.ix)
         assert IXFMemberData.objects.count() == 1
         assert preexisting_ixfmember_data == IXFMemberData.objects.first()
@@ -453,7 +959,6 @@ def test_suggest_modify(entities, use_ip, save):
     if (not network.ipv4_support and not use_ip(6)) or (
         not network.ipv6_support and not use_ip(4)
     ):
-
         # data changes and signature (ip) change with
         # partial ip protocol support
         # #770 and #771
@@ -462,7 +967,6 @@ def test_suggest_modify(entities, use_ip, save):
     elif (network.ipv4_support and network.ipv6_support) and (
         not use_ip(6) or not use_ip(4)
     ):
-
         # data changes and signature (ip) change with
         # full ip protocol support
         # #770 and #771
@@ -538,7 +1042,6 @@ def test_suggest_modify_no_routeserver(entities, save):
 
 
 def assert_data_change_notification(objects):
-
     """
     asserts that a set of data change notifications has
     been created after automated updates to netixlans (#403)
@@ -716,7 +1219,6 @@ def test_add_netixlan_conflict_local_ixf(entities, use_ip, save):
     if (not network.ipv4_support and invalid_ip == 4) or (
         not network.ipv6_support and invalid_ip == 6
     ):
-
         # edge case, signature changed, and invalid ip
         # is on unsupported protocol, making the proposal
         # irrelevant
@@ -728,7 +1230,6 @@ def test_add_netixlan_conflict_local_ixf(entities, use_ip, save):
     elif (network.ipv4_support and not use_ip(4)) or (
         network.ipv6_support and not use_ip(6)
     ):
-
         # edge case, signature changed, and invalid and
         # conflicting ip changed causing a drop of the original
         # erorring proposal, and a creation of a new one
@@ -818,7 +1319,6 @@ def test_add_netixlan_conflict(entities, save):
         )
 
     else:
-
         # invalid ip is on unsupported protocol, so it was ignored
         # #771
 
@@ -914,7 +1414,6 @@ def test_suggest_add_local_ixf(entities, use_ip, save):
     elif (network.ipv4_support and network.ipv6_support and not use_ip(4)) or (
         network.ipv4_support and network.ipv6_support and not use_ip(6)
     ):
-
         # edge case, supported protocols changed
         # effectively changing the signature, send
         # out modify to the existing netixlan and re-create
@@ -1030,7 +1529,6 @@ def test_suggest_add(entities, use_ip, save):
     elif (network.ipv4_support and network.ipv6_support and not use_ip(4)) or (
         network.ipv4_support and network.ipv6_support and not use_ip(6)
     ):
-
         # edge case, supported protocols changed
         # effectively changing the signature, send
         # out modify to the existing netixlan and re-create
@@ -1088,13 +1586,13 @@ def test_suggest_add_delete(entities, use_ip_alt, save):
     network = entities["net"]["UPDATE_DISABLED"]  # asn1001
     ixlan = entities["ixlan"][0]
 
-    # remove ip from ix-f data as per use_ip_alt fixture
+    # remove ip from IX-F data as per use_ip_alt fixture
     if not use_ip_alt(4):
         del data["member_list"][0]["connection_list"][0]["vlan_list"][0]["ipv4"]
     elif not use_ip_alt(6):
         del data["member_list"][0]["connection_list"][0]["vlan_list"][0]["ipv6"]
 
-    # we don't want the extra ix-f entry for this test
+    # we don't want the extra IX-F entry for this test
     del data["member_list"][0]["connection_list"][1]
 
     # This appears in the remote-ixf data so should not
@@ -1124,7 +1622,6 @@ def test_suggest_add_delete(entities, use_ip_alt, save):
     if (not network.ipv6_support and not use_ip_alt(4)) or (
         not network.ipv4_support and not use_ip_alt(6)
     ):
-
         # edge case: network not supporting the only provided ip
         # do nothing
         assert IXFMemberData.objects.all().count() == 0
@@ -1212,7 +1709,6 @@ def test_suggest_add_no_netixlan_local_ixf(entities, use_ip, save):
     if (not network.ipv4_support and use_ip(4) and not use_ip(6)) or (
         not network.ipv6_support and use_ip(6) and not use_ip(4)
     ):
-
         # edge case where the network has only one ip
         # set and its on an unsupported protocol
         # we re-create the ixfmemberdata and re notify the
@@ -1232,7 +1728,6 @@ def test_suggest_add_no_netixlan_local_ixf(entities, use_ip, save):
     elif (network.ipv4_support and network.ipv6_support and not use_ip(4)) or (
         network.ipv4_support and network.ipv6_support and not use_ip(6)
     ):
-
         # edge case, supported protocols changed
         # effectively changing the signature, send
         # we re-create the ixfmemberdata and re notify the
@@ -1349,7 +1844,6 @@ def test_single_ipaddr_matches(entities, save):
     importer.notify_proposals()
 
     if not network.ipv4_support or not network.ipv6_support:
-
         # edge case
         #
         # one protocol is turned off, in this case we actually
@@ -1425,12 +1919,10 @@ def test_single_ipaddr_matches_no_auto_update(entities, use_ip, save):
         and not (network.ipv4_support and use_ip(6) and not use_ip(4))
         and not (network.ipv6_support and use_ip(4) and not use_ip(6))
     ):
-
         assert len(importer.log["data"]) == 0
         assert_no_emails(network, ixlan.ix)
 
     else:
-
         # Assert NetworkIXLan is unchanged
         assert NetworkIXLan.objects.filter(status="ok").count() == 1
 
@@ -1561,7 +2053,6 @@ def test_two_missing_ipaddrs_no_auto_update(entities, save):
     assert NetworkIXLan.objects.filter(status="ok").count() == 2
 
     if not network.ipv4_support or not network.ipv6_support:
-
         # only one of the protocols is supported by the network
         # suggest deletion of the other ip address
 
@@ -2253,6 +2744,35 @@ def test_mark_invalid_remote_no_auto_update(entities, save):
 
 
 @pytest.mark.django_db
+def test_notify_duplicate_ip(entities, save):
+    data = setup_test_data("ixf.member.dupe.ip")
+    ixlan = entities["ixlan"][0]
+    start = datetime.datetime.now(datetime.timezone.utc)
+
+    importer = ixf.Importer()
+    data = importer.sanitize(data)
+
+    if not save:
+        return assert_idempotent(importer, ixlan, data, save=False)
+
+    assert importer.update(ixlan, data=data) == False
+    importer.notify_proposals()
+
+    assert IXFMemberData.objects.count() == 0
+    assert IXFImportEmail.objects.count() == 1
+    ERROR_MESSAGE = data.get("pdb_error")
+    assert "assigned to more than one distinct connection" in ERROR_MESSAGE
+    assert importer.ixlan.ixf_ixp_import_error_notified > start
+    assert ERROR_MESSAGE in importer.ixlan.ixf_ixp_import_error
+    assert (
+        ERROR_MESSAGE in IXFImportEmail.objects.filter(ix=ixlan.ix.id).first().message
+    )
+
+    # Test idempotent
+    assert_idempotent(importer, ixlan, data)
+
+
+@pytest.mark.django_db
 def test_mark_invalid_multiple_vlans(entities, save):
     """
     The IX-F data contains multiple vlans for prefixes specified
@@ -2299,6 +2819,70 @@ def test_mark_invalid_multiple_vlans(entities, save):
 
 
 @pytest.mark.django_db
+def test_vlan_null_ips(entities, save):
+    """
+    The IX-F data contains a vlan that has null values for ipv4 and ipv6
+    Importer should treat them the same as if they werent set at all (#1244)
+    """
+
+    data = setup_test_data("ixf.member.null.ip.vlan")
+    ixlan = entities["ixlan"][0]
+
+    importer = ixf.Importer()
+    importer.sanitize(data)
+
+    if not save:
+        return assert_idempotent(importer, ixlan, data, save=False)
+
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    assert importer.ixlan.ixf_ixp_import_error_notified is None
+    assert importer.ixlan.ixf_ixp_import_error is None
+    assert_no_emails(ix=ixlan.ix)
+
+    # Assert idempotent / lock
+    importer.sanitize(data)
+    importer.update(ixlan, data=data)
+
+    assert importer.ixlan.ixf_ixp_import_error_notified is None
+    assert importer.ixlan.ixf_ixp_import_error is None
+    assert_no_emails(ix=ixlan.ix)
+
+
+@pytest.mark.django_db
+def test_vlan_null_vlan_list_and_if_list(entities, save):
+    """
+    The IX-F data contains a vlan_list and if_list as null
+    Importer should treat them the same as if they werent set at all (#1244)
+    """
+
+    data = setup_test_data("ixf.member.null.vlan_list_and_if_list")
+    ixlan = entities["ixlan"][0]
+
+    importer = ixf.Importer()
+    importer.sanitize(data)
+
+    if not save:
+        return assert_idempotent(importer, ixlan, data, save=False)
+
+    importer.update(ixlan, data=data)
+    importer.notify_proposals()
+
+    assert importer.ixlan.ixf_ixp_import_error_notified is None
+    assert importer.ixlan.ixf_ixp_import_error is None
+    assert_no_emails(ix=ixlan.ix)
+
+    # Assert idempotent / lock
+    importer.sanitize(data)
+    importer.update(ixlan, data=data)
+
+    assert importer.ixlan.ixf_ixp_import_error_notified is None
+    assert importer.ixlan.ixf_ixp_import_error is None
+    assert_no_emails(ix=ixlan.ix)
+
+
+@pytest.mark.django_db
 def test_vlan_list_empty(entities, save):
     """
     VLAN list is empty. Per issue 882, this shouldn't raise any errors.
@@ -2328,6 +2912,7 @@ def test_vlan_list_empty(entities, save):
     assert_no_emails(ix=ixlan.ix)
 
 
+@pytest.mark.django_db
 def test_validate_json_schema():
     schema_url_base = "https://raw.githubusercontent.com/euro-ix/json-schemas/master/versions/ixp-member-list-{}.schema.json"
 
@@ -2654,7 +3239,6 @@ def test_resolve_deskpro_ticket(entities):
 
     consolid_emails = IXFImportEmail.objects.exclude(subject__icontains="conflict")
     for email in consolid_emails:
-
         # if network is only supporting one ip protocol
         # since the ix is sending both it should be mentioned
         if not network.ipv4_support:
@@ -2707,6 +3291,7 @@ def test_resolve_deskpro_ticket(entities):
     """
 
 
+@pytest.mark.django_db
 def test_vlan_sanitize(data_ixf_vlan):
     """
     test that various vlan_list setups are sanitized correctly
@@ -2718,7 +3303,6 @@ def test_vlan_sanitize(data_ixf_vlan):
 
 @pytest.mark.django_db
 def test_chained_consolidate_add_del(entities):
-
     """
     Tests the edge cause of a consolidated-add-del operation
     being the requirement of a new consolidated-add-del operation
@@ -2845,7 +3429,6 @@ def test_send_email(entities, use_ip):
 
 @pytest.mark.django_db
 def test_ixlan_add_netixlan_no_redundant_save_on_null_ip(entities):
-
     """
     Tests that if ixlan.add_netixlan receives a netixlan which
     has either ipaddr4 or ipaddr6 nulled will not cause redundant
@@ -3019,6 +3602,11 @@ def entities_base():
         # create ixlan(s)
         entities["ixlan"] = [ix.ixlan for ix in entities["ix"]]
 
+        for ixlan in entities["ixlan"]:
+            ixlan.ixf_ixp_import_enabled = True
+            ixlan.ixf_ixp_member_list_url = "https://localhost/IX-F"
+            ixlan.save()
+
         # create ixlan prefix(s)
         entities["ixpfx"] = [
             IXLanPrefix.objects.create(
@@ -3107,6 +3695,12 @@ def entities_base():
                 status="ok",
                 role="Policy",
             ),
+            NetworkContact.objects.create(
+                email="network3@localhost",
+                network=entities["net"]["UPDATE_DISABLED_2"],
+                status="ok",
+                role="Policy",
+            ),
         ]
         entities["netixlan"] = []
         admin_user = User.objects.create_user("admin", "admin@localhost", "admin")
@@ -3141,7 +3735,6 @@ def entities(request):
 
 
 class UseIPAddrWrapper:
-
     """
     To help test what happens when a network only
     sets either ip4 or ip6 address on their netixlan
@@ -3233,7 +3826,6 @@ def assert_ix_email(ix, email_info):
 
 
 def create_email_str(email):
-
     email = list(email)
 
     if not email[2]:
@@ -3260,7 +3852,6 @@ def assert_no_ix_email(ix):
 
 
 def assert_protocol_conflict_email(protocols, ix=None, network=None, solo=True):
-
     """
     Here we assert that protocol conflict notifications go out
 
@@ -3337,7 +3928,6 @@ def netixlan_list():
 
 
 def assert_idempotent(importer, ixlan, data, save=True):
-
     """
     run the importer for ixlan against data and
     assert that there are

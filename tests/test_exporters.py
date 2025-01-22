@@ -1,10 +1,13 @@
 """
 Test peeringdb data export views
 """
+
+import datetime
 import difflib
 import json
 import os
 import re
+import tempfile
 
 import pytest
 import reversion
@@ -31,7 +34,6 @@ class AdvancedSearchExportTest(ClientCase):
 
     @classmethod
     def setUpTestData(cls):
-
         ClientCase.setUpTestData()
 
         entity_count = list(range(1, 4))
@@ -59,6 +61,7 @@ class AdvancedSearchExportTest(ClientCase):
                 aka=f"AKA {i}",
                 policy_general="Open",
                 info_traffic="0-20Mbps",
+                info_types=["Content"],
                 asn=i,
                 org=cls.org[i - 1],
             )
@@ -90,6 +93,8 @@ class AdvancedSearchExportTest(ClientCase):
                 country=countries[i - 1],
                 zipcode=i,
                 org=cls.org[i - 1],
+                latitude=-6.591422,
+                longitude=106.786656,
             )
             for i in entity_count
         ]
@@ -165,6 +170,13 @@ class AdvancedSearchExportTest(ClientCase):
             "\r\n", "\n"
         ).rstrip() == self.expected_data("net", "csv")
 
+    def test_export_net_csv_with_api_cache(self):
+        """test csv export of net search while api-cache exists"""
+
+        call_command("pdb_api_cache", date=datetime.datetime.now().strftime("%Y%m%d"))
+
+        self.test_export_net_csv()
+
     def test_export_fac_json(self):
         """test json export of facility search"""
         client = Client()
@@ -197,6 +209,13 @@ class AdvancedSearchExportTest(ClientCase):
             "\r\n", "\n"
         ).rstrip() == self.expected_data("fac", "csv")
 
+    def test_export_fac_csv_with_api_cache(self):
+        """test csv export of facility search while api-cache exists"""
+
+        call_command("pdb_api_cache", date=datetime.datetime.now().strftime("%Y%m%d"))
+
+        self.test_export_fac_csv()
+
     def test_export_ix_json(self):
         """test json export of exchange search"""
         client = Client()
@@ -227,6 +246,13 @@ class AdvancedSearchExportTest(ClientCase):
         assert response.content.decode("utf-8").replace(
             "\r\n", "\n"
         ).rstrip() == self.expected_data("ix", "csv")
+
+    def test_export_ix_csv_with_api_cache(self):
+        """test csv export of ix search while api-cache exists"""
+
+        call_command("pdb_api_cache", date=datetime.datetime.now().strftime("%Y%m%d"))
+
+        self.test_export_ix_csv()
 
     def test_export_org_json(self):
         """test json export of organization search"""
@@ -262,3 +288,31 @@ class AdvancedSearchExportTest(ClientCase):
         assert response.content.decode("utf-8").replace(
             "\r\n", "\n"
         ).rstrip() == self.expected_data("org", "csv")
+
+    def test_export_org_csv_with_api_cache(self):
+        """test csv export of org search while api-cache exists"""
+
+        call_command("pdb_api_cache", date=datetime.datetime.now().strftime("%Y%m%d"))
+
+        self.test_export_org_csv()
+
+    def test_export_fac_kmz(self):
+        """test kmz export of facility search"""
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            output_file = os.path.join(output_dir, "advanced_search_export.kmz")
+
+            # Use a Django test client to send a GET request to the export kmz download endpoint
+            client = Client()
+            response = client.get(
+                "/export/advanced-search/fac/kmz?name_search=Facility"
+            )
+
+            # Check the response
+            assert response.status_code == 200
+            assert response["Content-Type"] == "application/vnd.google-earth.kmz"
+
+            assert (
+                response["Content-Disposition"]
+                == f'attachment; filename="{os.path.basename(output_file)}"'
+            )

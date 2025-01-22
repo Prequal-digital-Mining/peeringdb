@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 
@@ -13,42 +14,8 @@ import peeringdb_server.inet as pdbinet
 import peeringdb_server.management.commands.pdb_api_test as api_test
 import peeringdb_server.models as models
 
+from .test_api import setup_module, teardown_module
 from .util import reset_group_ids
-
-RdapLookup_get_asn = pdbinet.RdapLookup.get_asn
-
-
-def setup_module(module):
-
-    # RDAP LOOKUP OVERRIDE
-    # Since we are working with fake ASNs throughout the api tests
-    # we need to make sure the RdapLookup client can fake results
-    # for us
-
-    # These ASNs will be seen as valid and a prepared json object
-    # will be returned for them (data/api/rdap_override.json)
-    #
-    # ALL ASNs outside of this range will raise a RdapNotFoundError
-    ASN_RANGE_OVERRIDE = list(range(9000000, 9000999))
-
-    with open(
-        os.path.join(os.path.dirname(__file__), "data", "api", "rdap_override.json"),
-    ) as fh:
-        pdbinet.RdapLookup.override_result = json.load(fh)
-
-    def get_asn(self, asn):
-        if asn in ASN_RANGE_OVERRIDE:
-            return pdbinet.RdapAsn(self.override_result)
-        elif pdbinet.asn_is_bogon(asn):
-            return RdapLookup_get_asn(self, asn)
-        else:
-            raise pdbinet.RdapNotFoundError()
-
-    pdbinet.RdapLookup.get_asn = get_asn
-
-
-def teardown_module(module):
-    pdbinet.RdapLookup.get_asn = RdapLookup_get_asn
 
 
 class DummyResponse:
@@ -99,9 +66,13 @@ class DummyRestClientWithKeyAuth(RestClient):
         if kwargs.get("key") is not None:
             self.key = kwargs.get("key")
             self.api_client.credentials(HTTP_AUTHORIZATION="Api-Key " + self.key)
-            print(f"authenticating {self.user} w key {self.key}")
         elif self.user_inst:
-            self.api_client.force_authenticate(self.user_inst)
+            self.api_client.credentials(
+                HTTP_AUTHORIZATION="Basic "
+                + base64.b64encode(
+                    f"{self.user_inst.username}:{self.user_inst.username}".encode()
+                ).decode("utf-8")
+            )
 
     def _request(self, typ, id=0, method="GET", params=None, data=None, url=None):
         if not url:
@@ -126,7 +97,11 @@ class DummyRestClientWithKeyAuth(RestClient):
 URL = settings.API_URL
 VERBOSE = False
 USER = {"user": "api_test", "password": "89c8ec05-b897"}
-USER_ORG_ADMIN = {"user": "api_test_org_admin", "password": "89c8ec05-b897"}
+USER_ORG_ADMIN = {
+    "user": "api_test_org_admin",
+    "password": "89c8ec05-b897",
+    "email": "admin@org.com",
+}
 USER_ORG_MEMBER = {"user": "api_test_org_member", "password": "89c8ec05-b897"}
 
 
@@ -206,6 +181,7 @@ class APITests(TestCase, api_test.TestJSON, api_test.Command):
 
     def setUp(self):
         super().setUp()
+        setup_module(self.__class__)
 
         # db_user becomes the tester for user key
         api_test_user = models.User.objects.get(username=USER["user"])
@@ -213,12 +189,14 @@ class APITests(TestCase, api_test.TestJSON, api_test.Command):
             user=api_test_user, name="User api key"
         )
         self.db_user = self.rest_client(URL, verbose=VERBOSE, key=user_key, **USER)
+        self.user_key = api_key
 
         # db_org_admin becomes the tester for rw org api key
         rw_org = models.Organization.objects.get(name="API Test Organization RW")
         rw_api_key, rw_org_key = models.OrganizationAPIKey.objects.create_key(
-            name="test key", org=rw_org, email="test@localhost"
+            name="test key", org=rw_org, email=USER_ORG_ADMIN.get("email")
         )
+        self.org_key = rw_api_key
 
         # Transfer group permissions to org key
         for perm in rw_org.admin_usergroup.grainy_permissions.all():
@@ -243,6 +221,12 @@ class APITests(TestCase, api_test.TestJSON, api_test.Command):
         self.db_org_member = self.rest_client(
             URL, verbose=VERBOSE, key=r_org_key, **USER_ORG_MEMBER
         )
+
+    def tearDown(self):
+        teardown_module(
+            self.__class__
+        )  # Call the teardown_module function from your setup file
+        super().tearDown()
 
     # TESTS WE SKIP OR REWRITE IN API KEY CONTEXT
     def test_org_member_001_POST_ix_with_perms(self):
@@ -275,7 +259,6 @@ class APITests(TestCase, api_test.TestJSON, api_test.Command):
         )
 
     def test_org_admin_002_POST_PUT_DELETE_as_set(self):
-
         """
         The as-set endpoint is readonly, so all of these should
         fail
@@ -298,7 +281,6 @@ class APITests(TestCase, api_test.TestJSON, api_test.Command):
 
     # TESTS WE ADD FOR ORGANIZATION API KEY
     def test_org_key_admin_002_GET_as_set(self):
-
         """
         GET requests on the "as_set" endpoint should work with
         any org api key
@@ -320,6 +302,18 @@ class APITests(TestCase, api_test.TestJSON, api_test.Command):
         for net in networks:
             self.assertEqual(data[0].get(f"{net.asn}"), net.irr_as_set)
 
+    def test_org_key_002_inactive(self):
+        """
+        Test that inactive org keys are blocked
+        """
+
+        self.org_key.status = "inactive"
+        self.org_key.save()
+
+        with pytest.raises(PermissionDeniedException) as excinfo:
+            self.db_org_admin.all("net")
+        assert "Inactive API key" in str(excinfo.value)
+
     # TESTS WE ADD FOR USER API KEY
     def test_user_key_002_GET_as_set(self):
         """
@@ -331,3 +325,26 @@ class APITests(TestCase, api_test.TestJSON, api_test.Command):
         networks = models.Network.objects.filter(status="ok")
         for net in networks:
             self.assertEqual(data[0].get(f"{net.asn}"), net.irr_as_set)
+
+    def test_user_key_002_inactive_key(self):
+        """
+        Test that inactive user keys are blocked
+        """
+
+        self.user_key.status = "inactive"
+        self.user_key.save()
+
+        with pytest.raises(PermissionDeniedException) as excinfo:
+            self.db_user.all("net")
+        assert "Inactive API key" in str(excinfo.value)
+
+    def test_user_key_002_inactive_user(self):
+        """
+        Test that keys of inactive users are blocked
+        """
+        self.user_key.user.is_active = False
+        self.user_key.user.save()
+
+        with pytest.raises(PermissionDeniedException) as excinfo:
+            self.db_user.all("net")
+        assert "Inactive API key" in str(excinfo.value)
