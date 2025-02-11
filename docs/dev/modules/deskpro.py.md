@@ -1,4 +1,4 @@
-Generated from deskpro.py on 2022-07-15 18:42:55.852692
+Generated from deskpro.py on 2025-02-11 10:26:48.481231
 
 # peeringdb_server.deskpro
 
@@ -43,6 +43,23 @@ deletion of an object #696.
 `def ticket_queue_email_only(subject, body, email)`
 
 Queue a deskpro ticket for creation.
+
+---
+## ticket_queue_prefixauto_approve
+`def ticket_queue_prefixauto_approve(user, ix, prefix)`
+
+Queue deskro ticket creation for prefix automation action: create.
+
+---
+## ticket_queue_rir_status_updates
+`def ticket_queue_rir_status_updates(networks, threshold, date)`
+
+Queue a single deskpro ticket creation for multiple network RIR status
+updates and raise an exception if the threshold is exceeded.
+
+:param networks: List of network objects that have updated RIR status.
+:param threshold: Threshold number for network count to raise exception.
+:param date: Date of RIR status update.
 
 ---
 # Classes

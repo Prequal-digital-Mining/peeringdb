@@ -1,9 +1,21 @@
-Generated from export_views.py on 2022-07-15 18:42:55.900858
+Generated from export_views.py on 2025-02-11 10:26:51.333315
 
 # peeringdb_server.export_views
 
 Define export views used for IX-F export and advanced search file download.
 
+# Functions
+---
+
+## kmz_download
+`def kmz_download(request)`
+
+Will return a file download of the KMZ file located at
+settings.KMZ_EXPORT_FILE if it exists.
+
+Will also send cache headers based on the file's modification time
+
+---
 # Classes
 ---
 
@@ -31,7 +43,7 @@ Returns:
 
 ---
 #### generate
-`def generate(self, request)`
+`def generate(self, request, fmt)`
 
 Generate data for the reftag specified in self.tag
 
@@ -42,6 +54,25 @@ Arguments:
 
 Returns:
     - list: list containing rendered data rows ready for export
+
+---
+#### generate_campus
+`def generate_campus(self, request)`
+
+Fetch campus data from the API according to request and then render
+it ready for export.
+
+Arguments:
+    - request <Request>
+
+Returns:
+    - list: list containing rendered data ready for export
+
+---
+#### generate_carrier
+`def generate_carrier(self, request)`
+
+Fetch carrier data from the API and render it for export.
 
 ---
 #### generate_fac
@@ -166,5 +197,17 @@ Arguments:
 Returns:
     - HttpResponse: http response with appropriate json headers, cannot use
         JsonResponse here because we need to specify indent level
+
+---
+#### response_kmz
+`def response_kmz(self, data)`
+
+Return Response object for kmz response.
+
+Arguments:
+    - data <list>
+
+Returns:
+    - HttpResponse
 
 ---

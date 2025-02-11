@@ -4,7 +4,10 @@ import os
 import sys
 
 import django.conf.global_settings
+import django.conf.locale
+import redis
 import structlog
+import urllib3
 
 from mainsite.oauth2.scopes import SupportedScopes
 
@@ -181,7 +184,6 @@ def _set_bool(name, value, context):
 
 
 def _set_list(name, value, context):
-
     """
     For list types we split the env variable value using a comma as a delimiter
     """
@@ -229,9 +231,82 @@ def set_from_file(name, path, default=_DEFAULT_ARG, envvar_type=None):
     set_option(name, value, envvar_type)
 
 
+def can_ping_redis(host, port, password):
+    """
+    Check if Redis is available.
+    """
+    client = redis.StrictRedis(host=host, port=port, password=password)
+    try:
+        return client.ping()
+    except redis.ConnectionError:
+        return False
+
+
+def get_cache_backend(cache_name):
+    """
+    Function to get cache backend based on environment variable.
+    """
+    cache_backend = globals().get(f"{cache_name.upper()}_CACHE_BACKEND", "RedisCache")
+
+    options = {}
+
+    if cache_name == "error_emails":
+        options["MAX_ENTRIES"] = 2
+    elif cache_name == "default":
+        options["MAX_ENTRIES"] = CACHE_MAX_ENTRIES
+        options["CULL_FREQUENCY"] = 10
+
+    if cache_backend == "RedisCache":
+        print_debug(f"Checking if Redis is available for {cache_name}")
+        if can_ping_redis(REDIS_HOST, REDIS_PORT, REDIS_PASSWORD):
+            print_debug("Was able to ping Redis, using RedisCache")
+            return {
+                "BACKEND": "django.core.cache.backends.redis.RedisCache",
+                "LOCATION": f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}",
+                "OPTIONS": {},
+            }
+        else:
+            # fall back to DatabseCache if cache_name is sessions else
+            # LocMemCache
+            cache_backend = (
+                "DatabaseCache" if cache_name == "session" else "LocMemCache"
+            )
+            print_debug(
+                f"Was not able to ping Redis for {cache_name}, falling back to {cache_backend}"
+            )
+
+    if cache_backend == "LocMemCache":
+        return {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": cache_name,
+            "OPTIONS": options,
+        }
+
+    if cache_backend == "DatabaseCache":
+        return {
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": "django_cache",
+            "OPTIONS": options,
+        }
+
+    if cache_backend.startswith("DatabaseCache."):
+        _, location = cache_backend.split(".", 1)
+
+        return {
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": location.strip(),
+            "OPTIONS": options,
+        }
+
+
 _ = lambda s: s
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+# initial CACHES object so it can be used by release env specific
+# setup files
+
+CACHES = {}
 
 # set RELEASE_ENV, usually one of dev, beta, tutor, prod
 set_option("RELEASE_ENV", "dev")
@@ -270,15 +345,30 @@ set_option("DATABASE_NAME", "peeringdb")
 set_option("DATABASE_USER", "peeringdb")
 set_option("DATABASE_PASSWORD", "")
 
-# API Cache
+# redis
+set_option("REDIS_HOST", "127.0.0.1")
+set_option("REDIS_PORT", "6379")
+set_from_env("REDIS_PASSWORD", "")
 
+# API Cache
 set_option("API_CACHE_ENABLED", True)
 set_option("API_CACHE_ROOT", os.path.join(BASE_DIR, "api-cache"))
 set_option("API_CACHE_LOG", os.path.join(BASE_DIR, "var/log/api-cache.log"))
 
-# Keys
+# KMZ export file
+set_option("KMZ_EXPORT_FILE", os.path.join(API_CACHE_ROOT, "peeringdb.kmz"))
+set_option("KMZ_DOWNLOAD_PATH", "^export/kmz/$")
+if RELEASE_ENV == "dev":
+    # setting to blank means KMZ_DOWNLOAD_PATH is used instead and
+    # the file is served from the local filesystem
+    set_option("KMZ_DOWNLOAD_URL", "")
+else:
+    # setting this will override KMZ_DOWNLOAD_PATH to an absolute / external
+    # url. We do this by default if the release env is not dev
+    set_option("KMZ_DOWNLOAD_URL", "https://public.peeringdb.com/peeringdb.kmz")
 
-set_from_env("MELISSA_KEY")
+# Keys
+set_from_env("MELISSA_KEY", "")
 set_from_env("GOOGLE_GEOLOC_API_KEY")
 
 set_from_env("RDAP_LACNIC_APIKEY")
@@ -293,6 +383,11 @@ set_from_env(
     "OIDC_RSA_PRIVATE_KEY_ACTIVE_PATH", os.path.join(API_CACHE_ROOT, "keys", "oidc.key")
 )
 
+# Google tags
+
+# Analytics
+
+set_option("GOOGLE_ANALYTICS_ID", "")
 
 # Limits
 
@@ -316,42 +411,46 @@ set_option("API_THROTTLE_MELISSA_RATE_ORG", "10/minute")
 set_option("API_THROTTLE_MELISSA_ENABLED_IP", False)
 set_option("API_THROTTLE_MELISSA_RATE_IP", "1/minute")
 
+# configuration for write request limiting in the api (#1322)
+
+set_option("API_THROTTLE_RATE_WRITE", "100/minute")
+
 # Configuration for response-size rate limiting in the api (#1126)
 
 
 # Anonymous (ip-address) - Size threshold (bytes, default = 1MB)
-set_option("API_THROTTLE_RESPONSE_SIZE_THRESHOLD_IP", 1000000)
+set_option("API_THROTTLE_REPEATED_REQUEST_THRESHOLD_IP", 1000000)
 # Anonymous (ip-address) - Rate limit
-set_option("API_THROTTLE_RESPONSE_SIZE_RATE_IP", "10/minute")
+set_option("API_THROTTLE_REPEATED_REQUEST_RATE_IP", "10/minute")
 # Anonymous (ip-address) - On/Off toggle
-set_option("API_THROTTLE_RESPONSE_SIZE_ENABLED_IP", False)
+set_option("API_THROTTLE_REPEATED_REQUEST_ENABLED_IP", False)
 
 
 # Anonymous (cidr ipv4/24, ipv6/64) - Size threshold (bytes, default = 1MB)
-set_option("API_THROTTLE_RESPONSE_SIZE_THRESHOLD_CIDR", 1000000)
+set_option("API_THROTTLE_REPEATED_REQUEST_THRESHOLD_CIDR", 1000000)
 # Anonymous (cidr ipv4/24, ipv6/64) - Rate limit
-set_option("API_THROTTLE_RESPONSE_SIZE_RATE_CIDR", "10/minute")
+set_option("API_THROTTLE_REPEATED_REQUEST_RATE_CIDR", "10/minute")
 # Anonymous (cidr ipv4/24, ipv6/64) - On/Off toggle
-set_option("API_THROTTLE_RESPONSE_SIZE_ENABLED_CIDR", False)
+set_option("API_THROTTLE_REPEATED_REQUEST_ENABLED_CIDR", False)
 
 
 # User - Size threshold (bytes, default = 1MB)
-set_option("API_THROTTLE_RESPONSE_SIZE_THRESHOLD_USER", 1000000)
+set_option("API_THROTTLE_REPEATED_REQUEST_THRESHOLD_USER", 1000000)
 # User - Rate limit
-set_option("API_THROTTLE_RESPONSE_SIZE_RATE_USER", "10/minute")
+set_option("API_THROTTLE_REPEATED_REQUEST_RATE_USER", "10/minute")
 # User - On/Off toggle
-set_option("API_THROTTLE_RESPONSE_SIZE_ENABLED_USER", False)
+set_option("API_THROTTLE_REPEATED_REQUEST_ENABLED_USER", False)
 
 
 # Organization- Size threshold (bytes, default = 1MB)
-set_option("API_THROTTLE_RESPONSE_SIZE_THRESHOLD_ORG", 1000000)
+set_option("API_THROTTLE_REPEATED_REQUEST_THRESHOLD_ORG", 1000000)
 # Organization - Rate limit
-set_option("API_THROTTLE_RESPONSE_SIZE_RATE_ORG", "10/minute")
+set_option("API_THROTTLE_REPEATED_REQUEST_RATE_ORG", "10/minute")
 # Organization - On/Off toggle
-set_option("API_THROTTLE_RESPONSE_SIZE_ENABLED_ORG", False)
+set_option("API_THROTTLE_REPEATED_REQUEST_ENABLED_ORG", False)
 
-# Expected response sizes are cached for n seconds (default = 31 days)
-set_option("API_THROTTLE_RESPONSE_SIZE_CACHE_EXPIRY", 86400 * 31)
+# Expected repeated requests are cached for n seconds (default = 31 days)
+set_option("API_THROTTLE_REPEATED_REQUEST_CACHE_EXPIRY", 86400 * 31)
 
 
 # spatial queries require user auth
@@ -365,10 +464,10 @@ set_option("API_DISTANCE_FILTER_REQUIRE_VERIFIED", True)
 set_option("GEOCOORD_CACHE_EXPIRY", 86400 * 30)
 
 # maximum value to allow in network.info_prefixes4
-set_option("DATA_QUALITY_MAX_PREFIX_V4_LIMIT", 1000000)
+set_option("DATA_QUALITY_MAX_PREFIX_V4_LIMIT", 1200000)
 
 # maximum value to allow in network.info_prefixes6
-set_option("DATA_QUALITY_MAX_PREFIX_V6_LIMIT", 100000)
+set_option("DATA_QUALITY_MAX_PREFIX_V6_LIMIT", 180000)
 
 # minimum value to allow for prefix length on a v4 prefix
 set_option("DATA_QUALITY_MIN_PREFIXLEN_V4", 18)
@@ -391,6 +490,11 @@ set_option("DATA_QUALITY_MIN_SPEED", 100)
 # maximum value to allow for speed on an netixlan (currently 5Tbit)
 set_option("DATA_QUALITY_MAX_SPEED", 5000000)
 
+# validate parent status when saving objects (e.g., ensure an active object cannot have a deleted parent)
+# this SHOULD BE ENABLED in 99% of cases
+# developers may disable before running pdb_load if the sync source has broken parent -> child status relationships
+set_option("DATA_QUALITY_VALIDATE_PARENT_STATUS", True)
+
 set_option(
     "RATELIMITS",
     {
@@ -404,6 +508,8 @@ set_option(
         "view_username_retrieve_initiate": "2/m",
         "view_import_ixlan_ixf_preview": "1/m",
         "view_import_net_ixf_postmortem": "1/m",
+        "view_verified_update_POST": "3/m",
+        "view_verified_update_accept_POST": "4/m",
     },
 )
 
@@ -418,6 +524,35 @@ set_option("POC_DELETION_PERIOD", 30)
 # Otherwise we delete with the pdb_cleanup_vq tool
 set_option("VQUEUE_USER_MAX_AGE", 90)
 
+# NEGATIVE CACHE
+
+# 401 - unauthorized - 1 minute
+set_option("NEGATIVE_CACHE_EXPIRY_401", 60)
+
+# 403 - forbidden - 10 seconds (permission check failure)
+# it is recommended to keep this low as some permission checks
+# on write (POST, PUT) requests check the payload to determine
+# permission namespaces
+set_option("NEGATIVE_CACHE_EXPIRY_403", 10)
+
+# 429 - too many requests - 10 seconds
+# recommended to keep this low as to not interfer with the
+# REST api rate limiting that is already in place which includes
+# a timer as to when the rate limit will reset - the negative
+# cache will be on top of that and will obscure the accurate
+# rate limit reset time
+set_option("NEGATIVE_CACHE_EXPIRY_429", 10)
+
+# inactive users and inactive keys - 1 hour
+set_option("NEGATIVE_CACHE_EXPIRY_INACTIVE_AUTH", 3600)
+
+# throttled negative cache for repeated 401/403s (X per minute)
+set_option("NEGATIVE_CACHE_REPEATED_RATE_LIMIT", 10)
+
+# global on / off switch for negative cache
+set_option("NEGATIVE_CACHE_ENABLED", True)
+
+
 # Django config
 
 ALLOWED_HOSTS = ["*"]
@@ -431,11 +566,15 @@ ADMINS = [
 ]
 MANAGERS = ADMINS
 
-MEDIA_ROOT = os.path.abspath(os.path.join(BASE_DIR, "media"))
+set_option("MEDIA_ROOT", os.path.abspath(os.path.join(BASE_DIR, "media")))
 MEDIA_URL = f"/m/{PEERINGDB_VERSION}/"
 
-STATIC_ROOT = os.path.abspath(os.path.join(BASE_DIR, "static"))
+set_option("STATIC_ROOT", os.path.abspath(os.path.join(BASE_DIR, "static")))
 STATIC_URL = f"/s/{PEERINGDB_VERSION}/"
+
+# limit error emails (2/minute)
+set_option("ERROR_EMAILS_PERIOD", 60)
+set_option("ERROR_EMAILS_LIMIT", 2)
 
 # maximum number of entries in the cache
 set_option("CACHE_MAX_ENTRIES", 5000)
@@ -445,19 +584,22 @@ if CACHE_MAX_ENTRIES < 5000:
     raise ValueError("CACHE_MAX_ENTRIES needs to be >= 5000 (#1151)")
 
 
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
-        "LOCATION": "django_cache",
-        "OPTIONS": {
-            # maximum number of entries in the cache
-            "MAX_ENTRIES": CACHE_MAX_ENTRIES,
-            # once max entries are reach delete 500 of the oldest entries
-            "CULL_FREQUENCY": 10,
-        },
-    }
-}
+set_option("SESSION_ENGINE", "django.contrib.sessions.backends.db")
 
+set_option("DEFAULT_CACHE_BACKEND", "DatabaseCache")
+set_option("ERROR_EMAILS_CACHE_BACKEND", "LocMemCache")
+set_option("NEGATIVE_CACHE_BACKEND", "RedisCache")
+set_option("GEO_CACHE_BACKEND", "DatabaseCache.geo")
+
+# only relevant if SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+set_option("SESSION_CACHE_ALIAS", "session")
+set_option("SESSION_CACHE_BACKEND", "RedisCache")
+
+# setup caches
+cache_names = ["default", "negative", "session", "error_emails", "geo"]
+for cache_name in cache_names:
+    if cache_name not in CACHES:
+        CACHES[cache_name] = get_cache_backend(cache_name)
 
 # keep database connection open for n seconds
 # this is defined at the module level so we can expose
@@ -529,7 +671,8 @@ LOGGING = {
         # Include the default Django email handler for errors
         # This is what you'd get without configuring logging at all.
         "mail_admins": {
-            "class": "django.utils.log.AdminEmailHandler",
+            # "class": "django.utils.log.AdminEmailHandler",
+            "class": "peeringdb_server.log.ThrottledAdminEmailHandler",
             # only send emails for error logs
             "level": "ERROR",
             # But the emails are plain text by default - HTML is nicer
@@ -585,16 +728,17 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.sites",
     "django.contrib.messages",
-    "django.contrib.staticfiles",
     "haystack",
     "django_otp",
     "django_otp.plugins.otp_static",
     "django_otp.plugins.otp_totp",
     "django_otp.plugins.otp_email",
     "two_factor",
+    "two_factor.plugins.email",
     "dal",
     "dal_select2",
     "grappelli",
+    "import_export",
     "django.contrib.admin",
     "allauth",
     "allauth.account",
@@ -611,6 +755,7 @@ INSTALLED_APPS = [
     "django_tables2",
     "oauth2_provider",
     "peeringdb_server",
+    "django.contrib.staticfiles",
     "django_security_keys",
     "reversion",
     "captcha",
@@ -647,6 +792,7 @@ _TEMPLATE_CONTEXT_PROCESSORS = (
     "django.template.context_processors.static",
     "django.template.context_processors.tz",
     "django.contrib.messages.context_processors.messages",
+    "peeringdb_server.context_processors.theme_mode",
 )
 
 _TEMPLATE_DIRS = (os.path.join(BASE_DIR, "peeringdb_server", "templates"),)
@@ -664,18 +810,59 @@ TEMPLATES = [
 ]
 
 TEST_RUNNER = "django.test.runner.DiscoverRunner"
+set_option("X_FRAME_OPTIONS", "DENY")
+set_option("SECURE_BROWSER_XSS_FILTER", True)
+set_option("SECURE_CONTENT_TYPE_NOSNIFF", True)
+set_option("SECURE_HSTS_INCLUDE_SUBDOMAINS", True)
+set_option("SECURE_HSTS_SECONDS", 47304000)
+set_option("SECURE_REFERRER_POLICY", "strict-origin-when-cross-origin")
+
+set_option(
+    "CSP_DEFAULT_SRC",
+    [
+        "'self'",
+    ],
+)
+set_option("CSP_STYLE_SRC", ["'self'", "fonts.googleapis.com", "'unsafe-inline'"])
+set_option(
+    "CSP_SCRIPT_SRC",
+    [
+        "'self'",
+        "www.google.com",
+        "www.googletagmanager.com",
+        "www.gstatic.com",
+        "cdn.redoc.ly",
+        "'unsafe-inline'",
+    ],
+)
+set_option("CSP_FRAME_SRC", ["'self'", "www.google.com", "'unsafe-inline'"])
+set_option("CSP_FONT_SRC", ["'self'", "fonts.gstatic.com"])
+set_option("CSP_IMG_SRC", ["'self'", "cdn.redoc.ly", "data:"])
+set_option("CSP_WORKER_SRC", ["'self'", "blob:"])
+set_option(
+    "CSP_CONNECT_SRC",
+    [
+        "*.google-analytics.com",
+        "'self'",
+    ],
+)
 
 MIDDLEWARE = (
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
-    # "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+    "peeringdb_server.middleware.RedisNegativeCacheMiddleware",
+    "csp.middleware.CSPMiddleware",
     "peeringdb_server.middleware.PDBSessionMiddleware",
+    "peeringdb_server.middleware.CacheControlMiddleware",
+    "peeringdb_server.middleware.ActivateUserLocaleMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
 )
 
 AUTHENTICATION_BACKENDS = list()
@@ -696,9 +883,11 @@ ROOT_URLCONF = "mainsite.urls"
 
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
+set_from_env("FLAG_BAD_DATA_NEEDS_AUTH", None)
 
 # email vars should be already set from the release environment file
 # override here from env if set
+
 set_from_env("EMAIL_HOST")
 set_from_env("EMAIL_PORT")
 set_from_env("EMAIL_HOST_USER")
@@ -750,6 +939,11 @@ CORS_ALLOW_METHODS = ["GET", "OPTIONS"]
 # allows PeeringDB to use external OAuth2 sources
 set_bool("OAUTH_ENABLED", False)
 
+# https://django-oauth-toolkit.readthedocs.io/en/latest/changelog.html#id12
+# default changed to True in django-oauth-toolkit v2, set to False for now
+# to avoid breaking existing clients
+set_bool("PKCE_REQUIRED", False)
+
 # enables OpenID Connect support
 set_bool("OIDC_ENABLED", True)
 
@@ -758,9 +952,9 @@ set_from_file("OIDC_RSA_PRIVATE_KEY", OIDC_RSA_PRIVATE_KEY_ACTIVE_PATH, "", str)
 
 
 AUTHENTICATION_BACKENDS += (
-    # for passwordless auth using security-key
+    # for passkey auth using security-key
     # this needs to be first so it can do some clean up
-    "django_security_keys.backends.PasswordlessAuthenticationBackend",
+    "django_security_keys.backends.PasskeyAuthenticationBackend",
     # for OAuth provider
     "oauth2_provider.backends.OAuth2Backend",
     # for OAuth against external sources
@@ -779,12 +973,14 @@ MIDDLEWARE += (
 OAUTH2_PROVIDER = {
     "OIDC_ENABLED": OIDC_ENABLED,
     "OIDC_RSA_PRIVATE_KEY": OIDC_RSA_PRIVATE_KEY,
+    "PKCE_REQUIRED": PKCE_REQUIRED,
     "OAUTH2_VALIDATOR_CLASS": "mainsite.oauth2.validators.OIDCValidator",
     "SCOPES": {
         SupportedScopes.OPENID: "OpenID Connect scope",
         SupportedScopes.PROFILE: "user profile",
         SupportedScopes.EMAIL: "email address",
         SupportedScopes.NETWORKS: "list of user networks and permissions",
+        SupportedScopes.AMR: "authentication method reference",
     },
     "ALLOWED_REDIRECT_URI_SCHEMES": ["https"],
     "REQUEST_APPROVAL_PROMPT": "auto",
@@ -795,11 +991,54 @@ OAUTH2_PROVIDER = {
 # migration 0085 has been applied.
 
 set_option("OAUTH2_PROVIDER_APPLICATION_MODEL", "oauth2_provider.Application")
+set_option("OAUTH2_PROVIDER_GRANT_MODEL", "oauth2_provider.Grant")
+set_option("OAUTH2_PROVIDER_ACCESS_TOKEN_MODEL", "oauth2_provider.AccessToken")
+
+# This is setting is for cookie timeout for oauth sessions.
+# After the timeout, the ongoing oauth session would expire.
+
+set_option("OAUTH_COOKIE_MAX_AGE", 1800)
 
 ## grainy
 
 AUTHENTICATION_BACKENDS += ("django_grainy.backends.GrainyBackend",)
 
+## Django Elasticsearch DSL
+
+
+set_from_env("ELASTICSEARCH_URL", "")
+# same env var as used by ES server docker image
+set_from_env("ELASTIC_PASSWORD", "")
+
+if ELASTICSEARCH_URL:
+    INSTALLED_APPS.append("django_elasticsearch_dsl")
+    ELASTICSEARCH_DSL = {
+        "default": {
+            "hosts": ELASTICSEARCH_URL,
+            "http_auth": ("elastic", ELASTIC_PASSWORD),
+            "verify_certs": False,
+        }
+    }
+    # stop ES from spamming about unsigned certs
+    urllib3.disable_warnings()
+
+    ELASTICSEARCH_DSL_INDEX_SETTINGS = {"number_of_shards": 1}
+    ELASTICSEARCH_DSL_SIGNAL_PROCESSOR = (
+        "peeringdb_server.signals.ESSilentRealTimeSignalProcessor"
+    )
+else:
+    # disable ES
+
+    ELASTICSEARCH_DSL_AUTOSYNC = False
+    ELASTICSEARCH_DSL_AUTO_REFRESH = False
+
+# Elasticsearch score boost configuration
+set_option("ES_MATCH_PHRASE_BOOST", 10.0)
+set_option("ES_MATCH_PHRASE_PREFIX_BOOST", 5.0)
+set_option("ES_QUERY_STRING_BOOST", 2.0)
+
+# Set Elasticsearch request timeout
+set_option("ES_REQUEST_TIMEOUT", 30.0)
 
 ## Django Rest Framework
 
@@ -833,20 +1072,22 @@ if API_THROTTLE_ENABLED:
                 "peeringdb_server.rest_throttles.ResponseSizeThrottle",
                 "peeringdb_server.rest_throttles.FilterDistanceThrottle",
                 "peeringdb_server.rest_throttles.MelissaThrottle",
+                "peeringdb_server.rest_throttles.WriteRateThrottle",
             ),
             "DEFAULT_THROTTLE_RATES": {
                 "anon": API_THROTTLE_RATE_ANON,
                 "user": API_THROTTLE_RATE_USER,
                 "filter_distance": API_THROTTLE_RATE_FILTER_DISTANCE,
                 "ixf_import_request": API_THROTTLE_IXF_IMPORT,
-                "response_size_ip": API_THROTTLE_RESPONSE_SIZE_RATE_IP,
-                "response_size_cidr": API_THROTTLE_RESPONSE_SIZE_RATE_CIDR,
-                "response_size_user": API_THROTTLE_RESPONSE_SIZE_RATE_USER,
-                "response_size_org": API_THROTTLE_RESPONSE_SIZE_RATE_ORG,
+                "response_size_ip": API_THROTTLE_REPEATED_REQUEST_RATE_IP,
+                "response_size_cidr": API_THROTTLE_REPEATED_REQUEST_RATE_CIDR,
+                "response_size_user": API_THROTTLE_REPEATED_REQUEST_RATE_USER,
+                "response_size_org": API_THROTTLE_REPEATED_REQUEST_RATE_ORG,
                 "melissa_user": API_THROTTLE_MELISSA_RATE_USER,
                 "melissa_org": API_THROTTLE_MELISSA_RATE_ORG,
                 "melissa_ip": API_THROTTLE_MELISSA_RATE_IP,
                 "melissa_admin": API_THROTTLE_MELISSA_RATE_ADMIN,
+                "write_api": API_THROTTLE_RATE_WRITE,
             },
         }
     )
@@ -866,7 +1107,8 @@ set_bool("RDAP_IGNORE_RECURSE_ERRORS", True)
 set_option("SPONSORSHIPS_EMAIL", SERVER_EMAIL)
 
 
-set_option("API_URL", "https://peeringdb.com/api")
+set_option("API_URL", "https://www.peeringdb.com/api")
+set_option("PAGE_SIZE", 250)
 set_option("API_DEPTH_ROW_LIMIT", 250)
 
 # limit results for the standard search
@@ -883,6 +1125,9 @@ set_option("SEARCH_MAIN_ENTITY_BOOST", 1.5)
 
 set_option("BASE_URL", "http://localhost")
 set_option("PASSWORD_RESET_URL", os.path.join(BASE_URL, "reset-password"))
+
+# Sets the maximum allowed length for user passwords.
+set_option("MAX_LENGTH_PASSWORD", 1024)
 
 ACCOUNT_EMAIL_CONFIRMATION_ANONYMOUS_REDIRECT_URL = "/login"
 ACCOUNT_EMAIL_CONFIRMATION_AUTHENTICATED_REDIRECT_URL = "/verify"
@@ -913,6 +1158,7 @@ else:
 # collect webauthn device attestation
 set_option("WEBAUTHN_ATTESTATION", "none")
 
+
 # haystack
 
 set_option("WHOOSH_INDEX_PATH", os.path.join(API_CACHE_ROOT, "whoosh-index"))
@@ -925,6 +1171,7 @@ HAYSTACK_CONNECTIONS = {
         "BATCH_SIZE": 40000,
     },
 }
+
 
 set_option("HAYSTACK_ITERATOR_LOAD_PER_QUERY", 20000)
 set_option("HAYSTACK_LIMIT_TO_REGISTERED_MODELS", False)
@@ -945,7 +1192,7 @@ set_option(
         },
         "backends": {
             "django_peeringdb": {
-                "min": (2, 3, 0, 1),
+                "min": (3, 3, 0),
                 "max": (255, 0),
             },
         },
@@ -954,29 +1201,47 @@ set_option(
 
 set_option("IXF_POSTMORTEM_LIMIT", 250)
 
-# when encountering problems where an exchange's ix-f feed
+# when encountering problems where an exchange's IX-F feed
 # becomes unavilable / unparsable this setting controls
 # the interval in which we communicate the issue to them (hours)
 set_option("IXF_PARSE_ERROR_NOTIFICATION_PERIOD", 360)
 
-# toggle the creation of DeskPRO tickets from ix-f importer
+# toggle the creation of DeskPRO tickets from IX-F importer
 # conflicts
 set_option("IXF_TICKET_ON_CONFLICT", True)
 
-# send the ix-f importer generated tickets to deskpro
+# send the IX-F importer generated tickets to deskpro
 set_option("IXF_SEND_TICKETS", False)
 
 # toggle the notification of exchanges via email
-# for ix-f importer conflicts
+# for IX-F importer conflicts
 set_option("IXF_NOTIFY_IX_ON_CONFLICT", False)
 
 # toggle the notification of networks via email
-# for ix-f importer conflicts
+# for IX-F importer conflicts
 set_option("IXF_NOTIFY_NET_ON_CONFLICT", False)
 
 # number of days of a conflict being unresolved before
 # deskpro ticket is created
 set_option("IXF_IMPORTER_DAYS_UNTIL_TICKET", 6)
+
+# number of days until bad NetworkIXLan data is deleted
+# regardless of ixf-automation status on the network (#1271)
+set_option("IXF_REMOVE_STALE_NETIXLAN_PERIOD", 90)
+
+# number of notifications required to the network before
+# stale removal period is started (#1271)
+set_option("IXF_REMOVE_STALE_NETIXLAN_NOTIFY_COUNT", 3)
+
+# number of days between repeated notification of stale
+# #netixlan data (#1271)
+set_option("IXF_REMOVE_STALE_NETIXLAN_NOTIFY_PERIOD", 30)
+
+# on / off toggle for automatic stale netixlan removal
+# through IX-F (#1271)
+#
+# default was changed to False as part of #1360
+set_option("IXF_REMOVE_STALE_NETIXLAN", False)
 
 # clean up data change notification queue by discarding
 # entries older than this (7 days)
@@ -1005,13 +1270,23 @@ PEERINGDB_ABSTRACT_ONLY = True
 # the beta notification banner
 set_option("SHOW_AUTO_PROD_SYNC_WARNING", False)
 
-
-# TODO -- let's make this 1
-# TODO -- why are the ids different for prod, beta, tutor, etc?
 # all suggested entities will be created under this org
 set_option("SUGGEST_ENTITY_ORG", 20525)
+set_option("DEFAULT_SELF_ORG", 25554)
+set_option("DEFAULT_SELF_NET", 666)
+set_option("DEFAULT_SELF_IX", 4095)
+set_option("DEFAULT_SELF_FAC", 13346)
+set_option("DEFAULT_SELF_CARRIER", 66)
+set_option("DEFAULT_SELF_CAMPUS", 25)
+set_option("CAMPUS_MAX_DISTANCE", 50)
+set_option("FACILITY_MAX_DISTANCE_GEOCODE_NOT_EXISTS", 50)
+set_option("FACILITY_MAX_DISTANCE_GEOCODE_EXISTS", 1)
 
 set_option("TUTORIAL_MODE", False)
+set_option(
+    "TUTORIAL_MODE_MESSAGE",
+    "The tutorial environment is automatically restored from production when a new release is deployed. Any changes made here will not be permanent.",
+)
 
 #'guest' user group
 GUEST_GROUP_ID = 1
@@ -1043,6 +1318,7 @@ set_option("NON_ZIPCODE_COUNTRIES", non_zipcode_countries())
 ## Locale
 
 LANGUAGE_CODE = "en-us"
+LANGUAGE_COOKIE_AGE = 31557600  # one year
 USE_I18N = True
 USE_L10N = True
 
@@ -1085,6 +1361,19 @@ if ENABLE_ALL_LANGUAGES:
 
     LANGUAGES = sorted(language_dict.items())
 
+EXTRA_LANG_INFO = {
+    "oc": {
+        "bidi": False,
+        "code": "oc",
+        "name": "Occitan",
+        "name_local": "occitan",
+    },
+}
+
+# Add custom languages not provided by Django
+LANG_INFO = dict(django.conf.locale.LANG_INFO, **EXTRA_LANG_INFO)
+django.conf.locale.LANG_INFO = LANG_INFO
+
 
 # dynamic config starts here
 
@@ -1112,8 +1401,41 @@ set_option("ORG_CHILDLESS_DELETE_DURATION", 90)
 # n days after creation
 set_option("ORG_CHILDLESS_GRACE_DURATION", 1)
 
+# Delete orphaned user accounts after n days
+set_option("DELETE_ORPHANED_USER_DAYS", 90)
+
+# Notify orphaned users n days before deletion
+set_option("NOTIFY_ORPHANED_USER_DAYS", 30)
+
+# Grace period before a newly created user can be flagged for deletion
+# This is so users have some time to affiliate naturally. (days)
+set_option("MIN_AGE_ORPHANED_USER_DAYS", 14)
+
+# Setting for number of days before deleting pending user to organization affiliation requests
+set_option("AFFILIATION_REQUEST_DELETE_DAYS", 90)
+
+# Notification period to notify organizations of users missing 2FA (days)
+set_option("NOTIFY_MISSING_2FA_DAYS", 30)
+
 # pdb_validate_data cache timeout default
 set_option("PDB_VALIDATE_DATA_CACHE_TIMEOUT", 3600)
+
+# cache global stats (footer statistics) for N seconds
+set_option("GLOBAL_STATS_CACHE_DURATION", 900)
+
+# cache settings for optimal CDN use
+
+# static Pages - pages that only update through release deployment (seconds)
+set_option("CACHE_CONTROL_STATIC_PAGE", 15 * 60)
+
+# dynamic pages - entity views
+set_option("CACHE_CONTROL_DYNAMIC_PAGE", 10)
+
+# api cache responses (seconds)
+set_option("CACHE_CONTROL_API_CACHE", 15 * 60)
+
+# api responses (seconds)
+set_option("CACHE_CONTROL_API", 10)
 
 if RELEASE_ENV == "prod":
     set_option("PDB_PREPEND_WWW", True)
@@ -1134,7 +1456,27 @@ set_from_env(
     "RIR_ALLOCATION_DATA_PATH", os.path.join(API_CACHE_ROOT, "rdap-rir-status")
 )
 
+# Setting for number of days before deleting notok RIR
+set_option("KEEP_RIR_STATUS", 90)
+
+# A toggle for RIR status check
+set_option("AUTO_UPDATE_RIR_STATUS", True)
+
 set_option("RIR_ALLOCATION_DATA_CACHE_DAYS", 1)
+
+# A toggle for read only mode
+set_option("DJANGO_READ_ONLY", False)
+
+# A toggle to skip updating the last_login on login
+set_option("SKIP_LAST_LOGIN_UPDATE", False)
+
+if DJANGO_READ_ONLY:
+    INSTALLED_APPS += [
+        "django_read_only",
+    ]
+
+# show last database sync
+set_from_env("DATABASE_LAST_SYNC", None)
 
 
 if TUTORIAL_MODE:
@@ -1147,5 +1489,46 @@ else:
     EMAIL_SUBJECT_PREFIX = f"[{RELEASE_ENV}] "
 
 CSRF_USE_SESSIONS = True
+
+set_option("CSRF_TRUSTED_ORIGINS", WEBAUTHN_ORIGIN)
+
+# A toggle for the periodic re-authentication process propagated
+# by organizations (#736)
+set_option("PERIODIC_REAUTH_ENABLED", True)
+
+# Maximum amount of email addresses allowed per user
+set_option("USER_MAX_EMAIL_ADDRESSES", 5)
+
+# Authentication settings to use when syncing via pdb_load
+set_option("PEERINGDB_SYNC_USERNAME", "")
+set_option("PEERINGDB_SYNC_PASSWORD", "")
+
+# If the api key is specified it will be used over the username and password
+set_option("PEERINGDB_SYNC_API_KEY", "")
+
+# peeringdb sync cache
+set_option("PEERINGDB_SYNC_CACHE_URL", "https://public.peeringdb.com")
+set_option("PEERINGDB_SYNC_CACHE_DIR", os.path.join(BASE_DIR, "sync-cache"))
+
+# The default protocol used by django-allauth when generating URLs in email message to be https.
+# https://docs.allauth.org/en/dev/account/configuration.html
+set_option("ACCOUNT_DEFAULT_HTTP_PROTOCOL", "https")
+
+# Geo normalization settings
+set_option("GEO_COUNTRIES_WITH_STATES", ["US", "CA"])
+set_option(
+    "GEO_SOVEREIGN_MICROSTATES",
+    [
+        "AD",  # Andorra
+        "LI",  # Liechtenstein
+        "MC",  # Monaco
+        "MT",  # Malta
+        "MV",  # Maldives
+        "SC",  # Seychelles
+        "SG",  # Singapore
+        "SM",  # San Marino
+        "VA",  # Vatican City
+    ],
+)
 
 print_debug(f"loaded settings for PeeringDB {PEERINGDB_VERSION} (DEBUG: {DEBUG})")

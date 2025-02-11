@@ -1,30 +1,18 @@
-import datetime
-import io
 import json
 import os
 import re
-import time
-from pprint import pprint
 
-import jsonschema
 import pytest
-import requests
 import reversion
-from django.core.cache import cache
-from django.db import transaction
-from django.test import Client, RequestFactory, TestCase
+from django.core.exceptions import ValidationError
+from django.test import Client
 from django.urls import reverse
 
 from peeringdb_server import ixf
 from peeringdb_server.models import (
-    DeskProTicket,
     Group,
     InternetExchange,
     IXFMemberData,
-    IXLan,
-    IXLanIXFMemberImportAttempt,
-    IXLanIXFMemberImportLog,
-    IXLanIXFMemberImportLogEntry,
     IXLanPrefix,
     Network,
     NetworkIXLan,
@@ -46,7 +34,7 @@ def test_reset_ixf_proposals(admin_user, entities, ip_addresses):
     create_IXFMemberData(network, ixlan, ip_addresses, True)
 
     response = client.post(url)
-    content = response.content.decode("utf-8")
+    _ = response.content.decode("utf-8")
 
     assert response.status_code == 200
     assert IXFMemberData.objects.filter(dismissed=True).count() == 0
@@ -54,7 +42,6 @@ def test_reset_ixf_proposals(admin_user, entities, ip_addresses):
 
 @pytest.mark.django_db
 def test_dismiss_ixf_proposals(admin_user, entities, ip_addresses):
-
     network = entities["network"]
     ixlan = entities["ixlan"][0]
 
@@ -64,10 +51,10 @@ def test_dismiss_ixf_proposals(admin_user, entities, ip_addresses):
     url = reverse("net-dismiss-ixf-proposal", args=(network.id, ids[-1]))
 
     response = client.post(url)
-    content = response.content.decode("utf-8")
+    _ = response.content.decode("utf-8")
 
     assert response.status_code == 200
-    assert IXFMemberData.objects.filter(pk=ids[-1]).first().dismissed == True
+    assert IXFMemberData.objects.filter(pk=ids[-1]).first().dismissed is True
 
 
 @pytest.mark.django_db
@@ -89,7 +76,6 @@ def test_reset_ixf_proposals_no_perm(regular_user, entities, ip_addresses):
 
 @pytest.mark.django_db
 def test_dismiss_ixf_proposals_no_perm(regular_user, entities, ip_addresses):
-
     network = entities["network"]
     ixlan = entities["ixlan"][0]
 
@@ -131,6 +117,109 @@ def test_ix_order(admin_user, entities, ip_addresses, ip_addresses_other):
 
     matches = re.findall('<a class="ix-name">([^<]+)</a>', content)
     assert matches == ["Test Exchange One", "Test Exchange Two"]
+
+
+@pytest.mark.django_db
+def test_ix_disabled_import_hides_proposals(
+    admin_user, entities, ip_addresses, ip_addresses_other
+):
+    """
+    Test that disabling the import hides proposals made by it
+    """
+
+    network = entities["network"]
+    ixlan_a = entities["ixlan"][0]
+    ixlan_b = entities["ixlan"][1]
+
+    create_IXFMemberData(network, ixlan_a, ip_addresses, False)
+    create_IXFMemberData(network, ixlan_b, ip_addresses_other, False)
+
+    ixlan_a.ixf_ixp_import_enabled = False
+    ixlan_a.save()
+
+    client = setup_client(admin_user)
+
+    url = reverse("net-view", args=(network.id,))
+
+    with override_group_id():
+        response = client.get(url)
+    content = response.content.decode("utf-8")
+
+    assert response.status_code == 200
+
+    matches = re.findall('<a class="ix-name">([^<]+)</a>', content)
+    assert matches == ["Test Exchange Two"]
+
+
+@pytest.mark.django_db
+def test_ix_unset_ixf_url_hides_proposals(
+    admin_user, entities, ip_addresses, ip_addresses_other
+):
+    """
+    Test that disabling the import hides proposals made by it
+    """
+
+    network = entities["network"]
+    ixlan_a = entities["ixlan"][0]
+    ixlan_b = entities["ixlan"][1]
+
+    create_IXFMemberData(network, ixlan_a, ip_addresses, False)
+    create_IXFMemberData(network, ixlan_b, ip_addresses_other, False)
+
+    ixlan_a.ixf_ixp_member_list_url = ""
+    ixlan_a.save()
+
+    client = setup_client(admin_user)
+
+    url = reverse("net-view", args=(network.id,))
+
+    with override_group_id():
+        response = client.get(url)
+    content = response.content.decode("utf-8")
+
+    assert response.status_code == 200
+
+    matches = re.findall('<a class="ix-name">([^<]+)</a>', content)
+    assert matches == ["Test Exchange Two"]
+
+
+@pytest.mark.django_db
+def test_ix_disabled_import_hides_dismissed(
+    admin_user, entities, ip_addresses, ip_addresses_other
+):
+    """
+    Test that disabling the import hides proposals made by it
+    """
+
+    network = entities["network"]
+    ixlan_a = entities["ixlan"][0]
+
+    create_IXFMemberData(network, ixlan_a, [ip_addresses[0]], True)
+
+    client = setup_client(admin_user)
+    url = reverse("net-view", args=(network.id,))
+
+    with override_group_id():
+        response = client.get(url)
+    content = response.content.decode("utf-8")
+
+    # dismissed suggestion still relevant, confirm note is shown
+
+    assert response.status_code == 200
+    assert "You have dismissed some suggestions" in content
+
+    ixlan_a.ixf_ixp_import_enabled = False
+    ixlan_a.save()
+
+    with override_group_id():
+        response = client.get(url)
+
+    content = response.content.decode("utf-8")
+
+    # dismissed suggestion no longer relevant, confirm note is gibe
+
+    assert response.status_code == 200
+    assert "You have dismissed some suggestions" not in content
 
 
 @pytest.mark.django_db()
@@ -181,6 +270,48 @@ def test_dismissed_note(admin_user, entities, ip_addresses):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    "ipaddr4",
+    [
+        "195.69.144.0",  # test invalid network
+        "195.69.147.255",  # test invalid broadcast
+    ],
+)
+def test_invalid_ipaddr4(
+    admin_user, ixf_importer_user, entities, ip_addresses, ipaddr4
+):
+    network = Network.objects.create(
+        name="Network w allow ixp update disabled",
+        org=entities["org"][0],
+        asn=1001,
+        allow_ixp_update=False,
+        status="ok",
+        info_prefixes4=42,
+        info_prefixes6=42,
+        website="http://netflix.com/",
+        policy_general="Open",
+        policy_url="https://www.netflix.com/openconnect/",
+        info_unicast=False,
+        info_ipv6=False,
+    )
+    ixlan = entities["ixlan"][0]
+
+    with pytest.raises(ValidationError):
+        netixlan = NetworkIXLan.objects.create(
+            network=network,
+            ixlan=ixlan,
+            asn=network.asn,
+            speed=10000,
+            ipaddr4=ipaddr4,
+            ipaddr6="2001:7f8:1::a500:2906:3",
+            status="ok",
+            is_rs_peer=True,
+            operational=True,
+        )
+        netixlan.validate_ipaddr4()
+
+
+@pytest.mark.django_db
 def test_check_ixf_proposals(admin_user, ixf_importer_user, entities, ip_addresses):
     network = Network.objects.create(
         name="Network w allow ixp update disabled",
@@ -211,7 +342,7 @@ def test_check_ixf_proposals(admin_user, ixf_importer_user, entities, ip_address
         is_rs_peer=True,
         operational=True,
     )
-
+    netixlan.validate_ipaddr4()
     with open(
         os.path.join(
             os.path.dirname(__file__),
@@ -316,6 +447,11 @@ def entities():
         # create ixlan(s)
         entities["ixlan"] = [ix.ixlan for ix in entities["ix"]]
 
+        for ixlan in entities["ixlan"]:
+            ixlan.ixf_ixp_import_enabled = True
+            ixlan.ixf_ixp_member_list_url = "https://localhost/IX-F"
+            ixlan.save()
+
         # create ixlan prefix(s)
         entities["ixpfx"] = [
             IXLanPrefix.objects.create(
@@ -364,8 +500,6 @@ def entities():
 
 @pytest.fixture
 def admin_user():
-    from django.conf import settings
-
     guest_group, _ = Group.objects.get_or_create(name="guest")
     user_group, _ = Group.objects.get_or_create(name="user")
 

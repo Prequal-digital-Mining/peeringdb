@@ -1,4 +1,4 @@
-Generated from inet.py on 2022-07-15 18:42:55.852692
+Generated from inet.py on 2025-02-11 10:26:48.481231
 
 # peeringdb_server.inet
 
@@ -93,6 +93,12 @@ Arguments:
 
 Returns:
     - ipaddress.ip_address: renumbered ip address
+
+---
+## rir_status_is_ok
+`def rir_status_is_ok(rir_status)`
+
+Returns True if the rir_status is ok (allocated or assigned) or not
 
 ---
 # Classes

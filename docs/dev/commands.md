@@ -1,8 +1,12 @@
-Generated on 2022-07-15 18:42:55.852692
+Generated on 2025-02-11 10:26:48.481231
 
 ## _db_command.py
 
 DEPRECATED
+
+## migrate.py
+
+# Classes
 
 ## pdb_api_cache.py
 
@@ -28,9 +32,17 @@ Verification queue cleanup.
 
 Delete childless org objects
 
+## pdb_delete_outdated_pending_affil_request.py
+
+Deletes outdated pending affiliation requests from the database.
+
 ## pdb_delete_pocs.py
 
 Hard delete old soft-deleted network contract instances.
+
+## pdb_delete_users.py
+
+Delete childless org objects
 
 ## pdb_deskpro_publish.py
 
@@ -40,6 +52,10 @@ Process deskpro ticket queue.
 
 Reset a deskpro ticket and requeue for publishing.
 
+## pdb_export_address_info.py
+
+# Classes
+
 ## pdb_fac_merge.py
 
 Merge facilities.
@@ -47,6 +63,11 @@ Merge facilities.
 ## pdb_fac_merge_undo.py
 
 Undo a facility merge.
+
+## pdb_fetch_api_cache.py
+
+Django management command
+Will fetch api cache files from PEERINGDB_SYNC_CACHE_URL to API_CACHE_ROOT
 
 ## pdb_fix_930_users.py
 
@@ -60,6 +81,10 @@ Create test data. This will wipe all data locally, so use with caution. This com
 ## pdb_geo_normalize_existing.py
 
 Normalize existing address fields based on Google Maps API response.
+
+## pdb_geo_normalize_state.py
+
+# Classes
 
 ## pdb_geosync.py
 
@@ -87,6 +112,14 @@ Put peeringdb in or out of maintenance mode.
 DEPRECATED
 Used during ixlan migrations for #21.
 
+## pdb_notify_2fa.py
+
+Load initial data from another peeringdb instance using the REST API.
+
+## pdb_notify_geocoords.py
+
+# Classes
+
 ## pdb_process_admin_tool_command.py
 
 Process one item in the admin tool command queue.
@@ -104,6 +137,10 @@ Renumber addresses by providing the first three octets of a current ip4 address 
 Inspect an object's history of changes.
 
 ## pdb_rir_status.py
+
+# Classes
+
+## pdb_search_index.py
 
 # Classes
 
@@ -130,3 +167,7 @@ Command line whois.
 ## pdb_wipe.py
 
 Wipe all peering data.
+
+## runserver.py
+
+# Classes

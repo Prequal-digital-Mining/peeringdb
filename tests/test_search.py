@@ -2,6 +2,7 @@
 Unit-tests for quick search functionality - note that advanced search is not
 tested here as that is using the PDB API entirely.
 """
+
 import datetime
 import re
 
@@ -22,7 +23,6 @@ class SearchTests(TestCase):
 
     @classmethod
     def create_instance(cls, model, org, asn=1, prefix="Test", accented=False):
-
         kwargs = {}
         if model.handleref.tag == "net":
             kwargs = {"asn": asn}
@@ -44,7 +44,6 @@ class SearchTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-
         cls.instances = {}
         cls.instances_accented = {}
         cls.instances_sponsored = {}
@@ -130,7 +129,9 @@ class SearchTests(TestCase):
         response = views.request_search(request)
         m = re.findall(
             re.escape('<a href="/sponsors" class="sponsor silver">'),
-            response.content.decode(),
+            response.content.decode()
+            .split('id="search-category-view"')[1]
+            .split('id="search-list-view"')[0],
         )
 
         assert len(m) == 4

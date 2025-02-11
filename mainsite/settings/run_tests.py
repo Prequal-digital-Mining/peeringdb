@@ -32,9 +32,11 @@ MAX_USER_AFFILIATION_REQUESTS = 10
 MAIL_DEBUG = True
 IXF_PARSE_ERROR_NOTIFICATION_PERIOD = 36
 IXF_IMPORTER_DAYS_UNTIL_TICKET = 6
+IXF_REMOVE_STALE_NETIXLAN_PERIOD = 90
 IXF_SEND_TICKETS = False
 TUTORIAL_MODE = False
 CAPTCHA_TEST_MODE = True
+GLOBAL_STATS_CACHE_DURATION = 0
 CLIENT_COMPAT = {
     "client": {"min": (0, 6), "max": (0, 6, 5)},
     "backends": {"django_peeringdb": {"min": (0, 6), "max": (0, 6, 5)}},
@@ -51,7 +53,33 @@ RATELIMITS = {
     "request_translation": "10/m",
     "view_import_ixlan_ixf_preview": "1/m",
     "view_import_net_ixf_postmortem": "1/m",
+    "view_verified_update_POST": "3/m",
+    "view_verified_update_accept_POST": "4/m",
 }
+
 GUEST_GROUP_ID = 1
 USER_GROUP_ID = 2
 WHOOSH_STORAGE = "ram"
+ELASTICSEARCH_DSL_AUTOSYNC = False
+ELASTICSEARCH_DSL_AUTO_REFRESH = False
+IXF_REMOVE_STALE_NETIXLAN = True
+
+CACHES["negative"] = {
+    "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    "LOCATION": "negative",
+}
+CACHES["session"] = {
+    "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    "LOCATION": "session",
+}
+CACHES["default"] = {
+    "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    "LOCATION": "default",
+}
+CACHES["error_emails"] = {
+    "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    "LOCATION": "error_emails",
+}
+
+# set to high amount so we dont trigger it during tests
+NEGATIVE_CACHE_REPEATED_RATE_LIMIT = 10000000

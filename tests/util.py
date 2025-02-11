@@ -5,7 +5,7 @@ from importlib import import_module
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, Group
 from django.contrib.sessions.models import Session
-from django.middleware.csrf import CSRF_SESSION_KEY
+from django.middleware.csrf import CSRF_SESSION_KEY, _get_new_csrf_string
 from django.test import TestCase
 from django_grainy.models import GroupPermission, UserPermission
 
@@ -29,8 +29,10 @@ class ClientCase(TestCase):
         settings.GUEST_GROUP_ID = cls.guest_group.id
 
         cls.guest_user = models.User.objects.create_user(
-            "guest", "guest@localhost", "guest"
+            username="guest", email="guest@localhost", password="guest"
         )
+        models.EmailAddress.objects.create(user=cls.guest_user, email="guest@localhost")
+
         cls.guest_group.user_set.add(cls.guest_user)
 
         GroupPermission.objects.create(
@@ -55,7 +57,6 @@ class ClientCase(TestCase):
 
 
 class SettingsCase(ClientCase):
-
     """
     Since we read settings from peeringdb_server.settings
     we can't use the `settings` fixture from pytest-django
@@ -133,5 +134,5 @@ def setup_test_data(filename):
 def mock_csrf_session(request):
     engine = import_module(settings.SESSION_ENGINE)
     request.session = engine.SessionStore("deadbeef")
-    request.session[CSRF_SESSION_KEY] = "csrf-session-key"
+    request.session[CSRF_SESSION_KEY] = _get_new_csrf_string()
     request._dont_enforce_csrf_checks = True

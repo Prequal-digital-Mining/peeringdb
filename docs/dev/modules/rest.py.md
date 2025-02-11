@@ -1,4 +1,4 @@
-Generated from rest.py on 2022-07-15 18:42:55.852692
+Generated from rest.py on 2025-02-11 10:26:48.481231
 
 # peeringdb_server.rest
 
@@ -23,6 +23,12 @@ The peeringdb REST API is implemented through django-rest-framework.
 `def model_view_set(model, methods=None, mixins=None)`
 
 Shortcut for peeringdb models to generate viewset and register in the API urls.
+
+---
+## view_self_entity
+`def view_self_entity(request, args, kwargs)`
+
+This API View redirect self entity API to the corresponding url
 
 ---
 # Classes
@@ -58,6 +64,108 @@ querysets depending on the incoming request.
 (Eg. return a list of items that is specific to the user)
 
 ---
+
+## BasicAuthMFABlockWrite
+
+```
+BasicAuthMFABlockWrite(rest_framework.permissions.BasePermission)
+```
+
+When an account has MFA enabled and basic-auth is used
+to authenticate the account for a write operation on the API
+block the request.
+
+
+### Methods
+
+#### has_permission
+`def has_permission(self, request, view)`
+
+Return `True` if permission is granted, `False` otherwise.
+
+---
+
+## CampusFacilityMixin
+
+```
+CampusFacilityMixin(builtins.object)
+```
+
+Custom API endpoints for the campus-facility
+object, exposed to /api/campus/{campus_id}/add-facility/{fac_id}
+and /api/campus/{campus_id}/remove-facility/{fac_id}
+
+
+### Methods
+
+#### add_facility
+`def add_facility(self, request, args, kwargs)`
+
+Allows the org to approve a campus listing at their facility
+
+---
+#### remove_facility
+`def remove_facility(self, request, args, kwargs)`
+
+Allows the org to reject a campus listing at their facility
+
+---
+
+## CampusViewSet
+
+```
+CampusViewSet(peeringdb_server.rest.CampusFacilityMixin, peeringdb_server.rest.ModelViewSet)
+```
+
+Custom API endpoints for the campus-facility
+object, exposed to /api/campus/{campus_id}/add-facility/{fac_id}
+and /api/campus/{campus_id}/remove-facility/{fac_id}
+
+
+## CarrierFacilityMixin
+
+```
+CarrierFacilityMixin(builtins.object)
+```
+
+Custom API endpoints for the carrier-facility
+object, exposed to api/carrierfac/{id}/{action}
+
+
+### Methods
+
+#### approve
+`def approve(self, request, pk, args, kwargs)`
+
+Allows the org to approve a carrier listing at their facility
+
+---
+#### reject
+`def reject(self, request, pk, args, kwargs)`
+
+Allows the org to reject a carrier listing at their facility
+
+---
+
+## CarrierFacilityViewSet
+
+```
+CarrierFacilityViewSet(peeringdb_server.rest.CarrierFacilityMixin, peeringdb_server.rest.ModelViewSet)
+```
+
+Custom API endpoints for the carrier-facility
+object, exposed to api/carrierfac/{id}/{action}
+
+
+## CarrierViewSet
+
+```
+CarrierViewSet(peeringdb_server.rest.ModelViewSet)
+```
+
+Generic ModelViewSet Base Class.
+This should probably be moved to a common lib ?
+
 
 ## DataException
 
@@ -137,6 +245,34 @@ Generic ModelViewSet Base Class.
 This should probably be moved to a common lib ?
 
 
+## InactiveKeyBlock
+
+```
+InactiveKeyBlock(rest_framework.permissions.BasePermission)
+```
+
+When an OrganizationAPIKey or a UserAPIKey has status `inactive`
+requests made with such keys should be blocked
+
+
+### Methods
+
+#### has_permission
+`def has_permission(self, request, view)`
+
+Return `True` if permission is granted, `False` otherwise.
+
+---
+
+## InactiveKeyException
+
+```
+InactiveKeyException(rest_framework.exceptions.APIException)
+```
+
+Raised on api authentications with inactive api keys
+
+
 ## InternetExchangeFacilityViewSet
 
 ```
@@ -160,9 +296,9 @@ object, exposed to api/ix/{id}/{action}
 ### Methods
 
 #### request_ixf_import
-`def request_ixf_import(self, request, *args, **kwargs)`
+`def request_ixf_import(self, request, args, kwargs)`
 
-Allows managers of an ix to request an ix-f import.
+Allows managers of an ix to request an IX-F import.
 (#779)
 
 ---
@@ -236,14 +372,71 @@ Generic ModelViewSet Base Class.
 This should probably be moved to a common lib ?
 
 
+## NetworkIXLanMixin
+
+```
+NetworkIXLanMixin(builtins.object)
+```
+
+Custom API endpoint for setting or unsetting the net_side and ix_side values on a NetworkIXLan object.
+Exposed at /api/netixlan/{id}/set-net-side and /api/netixlan/{id}/set-ix-side (POST).
+
+These endpoints allow networks and exchanges to set (or unset) the net_side and ix_side values
+on a NetworkIXLan by providing a valid fac_id in the payload, or unset by passing null.
+
+Paths:
+/api/netixlan/{id}/set-net-side:
+/api/netixlan/{id}/set-ix-side:
+POST:
+    Summary: Set or unset the net_side or ix_side value on a NetworkIXLan
+    Description: Allows networks or exchanges to update the corresponding side values.
+    Parameters:
+        - id: The ID of the NetworkIXLan to update (in path, required, integer)
+    RequestBody:
+        - fac_id: The ID of the Facility to set as net_side or ix_side. Null to unset (integer or null, required)
+
+
+### Methods
+
+#### add_ix_side
+`def add_ix_side(self, request, args, kwargs)`
+
+Set or unset the ix_side value on a NetworkIXLan.
+This method sets a facility as the ix_side based on the facility ID from the request payload.
+If fac_id is null, the ix_side will be unset. Permissions are checked before saving changes.
+
+---
+#### add_net_side
+`def add_net_side(self, request, args, kwargs)`
+
+Set or unset the net_side value on a NetworkIXLan.
+This method sets a facility as the net_side based on the facility ID from the request payload.
+If fac_id is null, the net_side will be unset. Permissions are checked before saving changes.
+
+---
+
 ## NetworkIXLanViewSet
 
 ```
-NetworkIXLanViewSet(peeringdb_server.rest.ModelViewSet)
+NetworkIXLanViewSet(peeringdb_server.rest.NetworkIXLanMixin, peeringdb_server.rest.ModelViewSet)
 ```
 
-Generic ModelViewSet Base Class.
-This should probably be moved to a common lib ?
+Custom API endpoint for setting or unsetting the net_side and ix_side values on a NetworkIXLan object.
+Exposed at /api/netixlan/{id}/set-net-side and /api/netixlan/{id}/set-ix-side (POST).
+
+These endpoints allow networks and exchanges to set (or unset) the net_side and ix_side values
+on a NetworkIXLan by providing a valid fac_id in the payload, or unset by passing null.
+
+Paths:
+/api/netixlan/{id}/set-net-side:
+/api/netixlan/{id}/set-ix-side:
+POST:
+    Summary: Set or unset the net_side or ix_side value on a NetworkIXLan
+    Description: Allows networks or exchanges to update the corresponding side values.
+    Parameters:
+        - id: The ID of the NetworkIXLan to update (in path, required, integer)
+    RequestBody:
+        - fac_id: The ID of the Facility to set as net_side or ix_side. Null to unset (integer or null, required)
 
 
 ## NetworkViewSet
@@ -282,6 +475,29 @@ API root view, and adds format suffix patterns to the URLs.
 `def __init__(self, trailing_slash=False)`
 
 Initialize self.  See help(type(self)) for accurate signature.
+
+---
+
+## UnlimitedIfNoPagePagination
+
+```
+UnlimitedIfNoPagePagination(rest_framework.pagination.PageNumberPagination)
+```
+
+A simple page number based style that supports page numbers as
+query parameters. For example:
+
+http://api.example.org/accounts/?page=4
+http://api.example.org/accounts/?page=4&page_size=100
+
+
+### Methods
+
+#### paginate_queryset
+`def paginate_queryset(self, queryset, request, view=None)`
+
+Paginate a queryset if required, either returning a
+page object, or `None` if pagination is not configured for this view.
 
 ---
 

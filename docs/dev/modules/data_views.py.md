@@ -1,4 +1,4 @@
-Generated from data_views.py on 2022-07-15 18:42:55.852692
+Generated from data_views.py on 2025-02-11 10:26:48.481231
 
 # peeringdb_server.data_views
 
@@ -16,6 +16,13 @@ mode in UX.
 Return a JSON response with a list of asns that the user's
 organizations own to use for selecting asn in netixlan
 creation.
+
+---
+## campus_facilities
+`def campus_facilities(request)`
+
+Returns a JSON response with a dict of facilities that are part
+of a campus
 
 ---
 ## countries

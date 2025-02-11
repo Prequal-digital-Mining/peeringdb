@@ -29,7 +29,7 @@ class VeriQueueTests(TestCase):
         settings.GUEST_GROUP_ID = cls.guest_group.id
 
         cls.inst = {}
-        org = models.Organization.objects.create(name="Test", status="pending")
+        org = models.Organization.objects.create(name="Test", status="ok")
         for model in models.QUEUE_ENABLED:
             if model == models.Organization:
                 continue
@@ -61,19 +61,19 @@ class VeriQueueTests(TestCase):
 
     def test_deskpro_tickets(self):
         """
-        Test that tickets were created for the facility, ix and network
+        Test that tickets were created for the facility and ix
         """
         user = self.inst["user"]
         qs = models.DeskProTicket.objects
 
-        for tag in ["fac", "net", "ix"]:
+        for tag in ["fac", "ix"]:
             inst = self.inst[tag]
             vqi = models.VerificationQueueItem.get_for_entity(inst)
             vqi.user = user
             vqi.save()
             self.assertEqual(
                 qs.filter(
-                    subject=f"[{settings.RELEASE_ENV}] {vqi.content_type} - {inst}"
+                    subject=f"[{settings.RELEASE_ENV}] {vqi.content_type.model_class()._meta.verbose_name} - {inst}"
                 ).exists(),
                 True,
             )
@@ -82,7 +82,6 @@ class VeriQueueTests(TestCase):
         """
         Test VerificationqueueItem.approve
         """
-
         ix = self.inst.get("ix")
         vqi = models.VerificationQueueItem.get_for_entity(ix)
 

@@ -1,11 +1,12 @@
 
 # PeeringDB
 
-[![Travis CI](https://img.shields.io/travis/peeringdb/peeringdb.svg?maxAge=3600)](https://travis-ci.org/peeringdb/peeringdb)
-[![Codecov](https://img.shields.io/codecov/c/github/peeringdb/peeringdb/master.svg?maxAge=3600)](https://codecov.io/github/peeringdb/peeringdb)
+[![tests](https://github.com/peeringdb/peeringdb/actions/workflows/tests.yml/badge.svg)](https://github.com/peeringdb/peeringdb/actions/workflows/tests.yml)
+[![CodeQL](https://github.com/peeringdb/peeringdb/actions/workflows/codeql.yml/badge.svg)](https://github.com/peeringdb/peeringdb/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/peeringdb/peeringdb/branch/master/graph/badge.svg?token=zYAhZzltxV)](https://codecov.io/gh/peeringdb/peeringdb)
 
 
-[PeeringDB](https://peeringdb.com/) provides a scalable way to publish
+[PeeringDB](https://www.peeringdb.com/) provides a scalable way to publish
 interconnection related information for tens of thousands of network
 operators. Over the years, more and more organisations have built
 integrations to streamline their interconnection processes.

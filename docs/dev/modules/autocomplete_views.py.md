@@ -1,4 +1,4 @@
-Generated from autocomplete_views.py on 2022-07-15 18:42:55.852692
+Generated from autocomplete_views.py on 2025-02-11 10:26:48.481231
 
 # peeringdb_server.autocomplete_views
 
@@ -26,6 +26,35 @@ List options for a Select2 widget.
 `def render_to_response(self, context)`
 
 Return a JSON response in Select2 format.
+
+---
+
+## BaseFacilityAutocompleteForPort
+
+```
+BaseFacilityAutocompleteForPort(peeringdb_server.autocomplete_views.AutocompleteHTMLResponse)
+```
+
+Base class for facility autocomplete for ports.
+
+Provides the base queryset and result label logic for filtering
+facilities based on a search query (name or address1) and ordering
+by the facility's name. This class is intended to be extended by
+more specific facility-related autocomplete classes.
+
+
+### Methods
+
+#### get_queryset
+`def get_queryset(self)`
+
+Filter the queryset with GET['q'].
+
+---
+#### get_result_label
+`def get_result_label(self, item)`
+
+Return the label of a result.
 
 ---
 
@@ -180,6 +209,24 @@ Filter the queryset with GET['q'].
 
 ---
 
+## FacilityAutocompleteForOrganization
+
+```
+FacilityAutocompleteForOrganization(peeringdb_server.autocomplete_views.FacilityAutocomplete)
+```
+
+List of facilities under same organization ownership
+
+
+### Methods
+
+#### get_queryset
+`def get_queryset(self)`
+
+Filter the queryset with GET['q'].
+
+---
+
 ## FacilityAutocompleteJSON
 
 ```
@@ -233,6 +280,28 @@ Return the label of a result.
 
 ---
 
+## InternetExchangeFacilityAutoComplete
+
+```
+InternetExchangeFacilityAutoComplete(peeringdb_server.autocomplete_views.BaseFacilityAutocompleteForPort)
+```
+
+Autocomplete class for facilities within a specific Internet Exchange (IX).
+
+Extends the base class to filter facilities associated with a specific
+Internet Exchange. The `ix_id` parameter is used to filter the related
+facilities.
+
+
+### Methods
+
+#### get_queryset
+`def get_queryset(self)`
+
+Filter the queryset with GET['q'].
+
+---
+
 ## NetworkAutocomplete
 
 ```
@@ -254,6 +323,27 @@ Filter the queryset with GET['q'].
 `def get_result_label(self, item)`
 
 Return the label of a result.
+
+---
+
+## NetworkFacilityAutocomplete
+
+```
+NetworkFacilityAutocomplete(peeringdb_server.autocomplete_views.BaseFacilityAutocompleteForPort)
+```
+
+Autocomplete class for facilities within a specific network.
+
+Extends the base class to filter facilities associated with a
+specific network. Excludes facilities not linked to the network.
+
+
+### Methods
+
+#### get_queryset
+`def get_queryset(self)`
+
+Filter the queryset with GET['q'].
 
 ---
 

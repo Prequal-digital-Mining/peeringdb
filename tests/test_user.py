@@ -232,6 +232,82 @@ class UserTests(TestCase):
         resp = views.view_password_reset(request)
         self.assertEqual(resp.status_code, 400)
 
+    def test_password_change(self):
+        """Test user password change with various scenarios."""
+        client = Client()
+        client.force_login(self.user_a)
+
+        # Define the password change endpoint
+        url = "/change-password"
+        current_password = "user_a"
+
+        # Helper function to send POST request
+        def post_password_change(password, password_v):
+            """Helper to send password change POST request and return response."""
+            return client.post(
+                url,
+                {
+                    "password_c": current_password,
+                    "password": password,
+                    "password_v": password_v,
+                },
+            )
+
+        # Test cases with expected status codes
+        test_cases = [
+            {
+                "password": "updated",  # Password too short
+                "password_v": "updated",
+                "expected_status": 400,
+                "expected_message": "Needs to be at least 10 characters long",
+            },
+            {
+                "password": "a" * 1025,  # Password too long
+                "password_v": "a" * 1025,
+                "expected_status": 400,
+                "expected_message": "Password is too long",
+            },
+            {
+                "password": "updatedpassword",  # Valid password
+                "password_v": "updatedpassword",
+                "expected_status": 200,
+                "expected_message": None,
+            },
+        ]
+
+        # Run through the test cases
+        for case in test_cases:
+            with self.subTest(password=case["password"]):
+                response = post_password_change(case["password"], case["password_v"])
+
+                # Check status code
+                self.assertEqual(response.status_code, case["expected_status"])
+
+                # Validate response content
+                response_content = response.content.decode("utf-8")
+                if case["expected_status"] == 400:
+                    self.assertIn(case["expected_message"], response_content)
+                elif case["expected_status"] == 200:
+                    response_json = json.loads(response_content)
+                    self.assertEqual(response_json, {"status": "ok"})
+
+    def test_login_failed(self):
+        data = {
+            "next": f"/org/{self.org_a.id}",
+            "auth-username": "wrong_user",
+            "auth-password": "wrong_password",
+            "login_view-current_step": "auth",
+        }
+
+        C = Client()
+        resp = C.post("/account/login/", data, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            "Please enter a correct username and password. Note that password is case-sensitive.",
+        )
+
     def test_login_redirect(self):
         data = {
             "next": f"/org/{self.org_a.id}",
@@ -254,6 +330,38 @@ class UserTests(TestCase):
         resp = C.post("/account/login/", data, follow=True)
         self.assertEqual(resp.redirect_chain, [("/", 302)])
         self.assertEqual(resp.context["user"].is_authenticated, True)
+
+    def test_username_change(self):
+        c = Client()
+        c.force_login(self.user_a)
+
+        response = c.post(
+            "/change-username", {"password": "user_a", "username": "updateduser"}
+        )
+
+        self.user_a.refresh_from_db()
+
+        assert self.user_a.username == "updateduser"
+
+        response = c.post(
+            "/change-username", {"password": "wrongpassword", "username": "user_a"}
+        )
+
+        assert response.status_code == 400
+
+        self.user_a.refresh_from_db()
+
+        assert self.user_a.username == "updateduser"
+
+        response = c.post(
+            "/change-username", {"password": "user_a", "username": "user a£%"}
+        )
+
+        assert response.status_code == 400
+
+        self.user_a.refresh_from_db()
+
+        assert self.user_a.username == "updateduser"
 
     def test_username_retrieve(self):
         """
@@ -303,28 +411,127 @@ class UserTests(TestCase):
             email = c.session["username_retrieve_email"]
 
     def test_signup(self):
-        """
-        test user signup with captcha fallback
-        """
+        """Test user signup with captcha and password validation."""
 
-        c = Client()
-        response = c.get("/register")
+        # Setup only for test_signup
+        client = Client()
+        response = client.get("/register")
+
+        # Extract captcha from the registration page
         assert 'name="captcha_generator_0"' in response.content.decode()
-        m = re.search(
+        captcha_key = re.search(
             'name="captcha_generator_0" value="([^"]+)"', response.content.decode()
-        )
+        ).group(1)
+        captcha_obj = CaptchaStore.objects.get(hashkey=captcha_key)
+        captcha = f"{captcha_obj.hashkey}:{captcha_obj.response}"  # noqa: E231
 
-        captcha_obj = CaptchaStore.objects.get(hashkey=m.group(1))
+        valid_email = "signuptest@localhost"
+        username = "signuptest"
 
-        response = c.post(
-            "/register",
+        # Helper function to POST data and return JSON response
+        def post_signup(password1, password2):
+            """Send POST request to /register and return decoded JSON response."""
+            response = client.post(
+                "/register",
+                {
+                    "username": username,
+                    "password1": password1,
+                    "password2": password2,
+                    "email": valid_email,
+                    "captcha": captcha,
+                },
+            )
+            return json.loads(response.content)
+
+        # Test password scenarios
+        test_cases = [
             {
-                "username": "signuptest",
-                "password1": "signuptest_123",
-                "password2": "signuptest_123",
-                "email": "signuptest@localhost",
-                "captcha": f"{captcha_obj.hashkey}:{captcha_obj.response}",
+                "password": "signup",
+                "expected_error": "Password must be at least 10 characters long.",
             },
+            {"password": "a" * 1025, "expected_error": "Password is too long."},
+            {
+                "password": "signuptest_123",
+                "expected_error": None,
+            },  # Success for valid password
+        ]
+
+        # Loop through each test case and run subtests
+        for case in test_cases:
+            with self.subTest(password=case["password"]):
+                response_data = post_signup(case["password"], case["password"])
+
+                if case["expected_error"]:
+                    self.assertEqual(
+                        response_data,
+                        {"password1": case["expected_error"]},
+                        f"Expected error message for password '{case['password']}'",
+                    )
+                else:
+                    self.assertEqual(
+                        response_data,
+                        {"status": "ok"},
+                        "Expected success message for valid signup.",
+                    )
+
+    def test_remove_org_affiliation_process_success(self):
+        c = Client()
+        c.force_login(self.user_a)
+
+        self.assertTrue(self.user_a.is_org_member(self.org_a))
+
+        data = {"organization": self.org_a.id}
+        # first dialog if user is the last member of the org
+        response = c.post("/remove-affiliation/", data)
+        data = json.loads(response.content)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.user_a.is_org_member(self.org_a))
+        self.assertEqual(data["status"], "ok")
+
+    def test_remove_org_affiliation_process_not_affiliated(self):
+        c = Client()
+        c.force_login(self.user_a)
+
+        self.assertFalse(self.user_a.is_org_member(self.org_b))
+
+        data = {"organization": self.org_b.id}
+        response = c.post("/remove-affiliation/", data)
+        data = json.loads(response.content)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(data["error"], f"{self.user_a} is not member of {self.org_b}")
+
+    def test_remove_org_affiliation_dialog(self):
+        c = Client()
+        c.force_login(self.user_a)
+
+        # first dialog if user is the last member of the org
+        response = c.get(f"/remove-affiliation/?org={self.org_a.id}")
+        self.assertIn(
+            b"Are you sure you want to do this...?",
+            response.content,
+        )
+        # check if the submit button is redirecting to the second dialog page
+        self.assertIn(
+            b"window.location.href + '&commit=1'",
+            response.content,
         )
 
-        self.assertEqual(json.loads(response.content), {"status": "ok"})
+        # second dialog, its redirected from the first dialog if user is the last member of the org
+        response = c.get(f"/remove-affiliation/?org={self.org_a.id}&commit=1")
+        self.assertIn(
+            f"if you remove your affiliation to {self.org_a}, organization {self.org_a} will be abandoned".encode(),
+            response.content,
+        )
+
+        # first dialog if user is the last member of the org
+        self.org_a.usergroup.user_set.add(self.user_b)
+        response = c.get(f"/remove-affiliation/?org={self.org_a.id}")
+        self.assertIn(
+            b"Are you sure you want to do this...?",
+            response.content,
+        )
+        # check if the submit button is not redirecting to the second dialog page
+        self.assertNotIn(
+            b"window.location.href + '&commit=1'",
+            response.content,
+        )

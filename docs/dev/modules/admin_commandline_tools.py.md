@@ -1,4 +1,4 @@
-Generated from admin_commandline_tools.py on 2022-07-15 18:42:55.852692
+Generated from admin_commandline_tools.py on 2025-02-11 10:26:48.481231
 
 # peeringdb_server.admin_commandline_tools
 
@@ -41,8 +41,8 @@ Returns:
 ToolIXFIXPMemberImport(peeringdb_server.admin_commandline_tools.CommandLineToolWrapper)
 ```
 
-Allows resets for various parts of the ix-f member data import protocol.
-And import ix-f member data for a single Ixlan at a time.
+Allows resets for various parts of the IX-F member data import protocol.
+And import IX-F member data for a single Ixlan at a time.
 
 
 ### Instanced Attributes

@@ -1,4 +1,4 @@
-Generated from serializers.py on 2022-07-15 18:42:55.852692
+Generated from serializers.py on 2025-02-11 10:26:48.481231
 
 # peeringdb_server.serializers
 
@@ -85,7 +85,7 @@ and will fail if no matching asn is found.
 ### Methods
 
 #### \__call__
-`def __call__(self, attrs)`
+`def __call__(self, attrs, serializer_field)`
 
 Call self as a function.
 
@@ -94,6 +94,71 @@ Call self as a function.
 `def __init__(self, field=asn, message=None, methods=None)`
 
 Initialize self.  See help(type(self)) for accurate signature.
+
+---
+
+## CampusSerializer
+
+```
+CampusSerializer(peeringdb_server.serializers.SpatialSearchMixin, peeringdb_server.serializers.ModelSerializer)
+```
+
+Serializer for peeringdb_server.models.Campus
+
+
+### Class Methods
+
+#### prepare_query
+`def prepare_query(cls, qset, **kwargs)`
+
+Allows filtering by indirect relationships.
+
+Currently supports: facility
+
+---
+
+### Methods
+
+#### to_representation
+`def to_representation(self, data)`
+
+Object instance -> Dict of primitive datatypes.
+
+---
+
+## CarrierFacilitySerializer
+
+```
+CarrierFacilitySerializer(peeringdb_server.serializers.ModelSerializer)
+```
+
+Serializer for peeringdb_server.models.CarrierFacility
+
+
+## CarrierSerializer
+
+```
+CarrierSerializer(peeringdb_server.serializers.ModelSerializer)
+```
+
+Serializer for peeringdb_server.models.Carrier
+
+
+### Class Methods
+
+#### prepare_query
+`def prepare_query(cls, qset, **kwargs)`
+
+Allows filtering by indirect relationships, similar to NetworkSerializer.
+
+---
+
+### Methods
+
+#### to_representation
+`def to_representation(self, data)`
+
+Object instance -> Dict of primitive datatypes.
 
 ---
 
@@ -114,6 +179,12 @@ Possible relationship queries:
 
 ### Methods
 
+#### \__init__
+`def __init__(self, *args, **kwargs)`
+
+Initialize self.  See help(type(self)) for accurate signature.
+
+---
 #### to_internal_value
 `def to_internal_value(self, data)`
 
@@ -124,6 +195,14 @@ Dict of native values <- Dict of primitive datatypes.
 `def to_representation(self, instance)`
 
 Object instance -> Dict of primitive datatypes.
+
+---
+#### update
+`def update(self, instance, validated_data)`
+
+When updating a geo-enabled object,
+update the model first
+and then normalize the geofields.
 
 ---
 
@@ -220,11 +299,18 @@ a address suggestion should be provided to the user.
 
 ---
 #### update
-`def update(self, instance, validated_data)`
+`def update(self, instance, validated_data, ignore_geosync=False)`
 
 When updating a geo-enabled object,
 update the model first
 and then normalize the geofields.
+
+---
+#### validate_floor
+`def validate_floor(self, floor)`
+
+As per #1482 the floor field is being deprecated
+and only empty values are allowed.
 
 ---
 
@@ -289,7 +375,7 @@ Possible relationship queries:
 
 Entities created via the API should go into the verification
 queue with status pending if they are in the QUEUE_ENABLED
-list.
+list or suggest is True.
 
 ---
 #### to_representation
@@ -416,12 +502,19 @@ Will raise a django DoesNotExist error if either ipaddress does not
 exist on a deleted netixlan
 
 ---
+#### _render_social_media
+`def _render_social_media(self, output)`
+
+Until v3 the `website` field still drives the website url of the object
+but we can start rendering in the `social_media` field as well.
+
+---
 #### create
-`def create(self, validated_data)`
+`def create(self, validated_data, auto_approve=False, suggest=False)`
 
 Entities created via the API should go into the verification
 queue with status pending if they are in the QUEUE_ENABLED
-list.
+list or suggest is True.
 
 ---
 #### finalize_create
@@ -528,6 +621,8 @@ Possible relationship queries:
   - net_id, handled by serializer
   - ixlan_id, handled by serializer
   - ix_id, handled by prepare_query
+  - ixlan_id, handled by serializer
+  - ix_side_id, handled by serializer
 
 
 ### Class Methods
@@ -596,7 +691,7 @@ Currently supports: ixlan_id, ix_id, netixlan_id, netfac_id, fac_id
 
 Entities created via the API should go into the verification
 queue with status pending if they are in the QUEUE_ENABLED
-list.
+list or suggest is True.
 
 ---
 #### finalize_create
@@ -605,10 +700,22 @@ list.
 This will be called on the end of POST request to this serializer.
 
 ---
+#### get_rir_status
+`def get_rir_status(self, inst)`
+
+Normalized RIR status for network
+
+---
 #### to_internal_value
 `def to_internal_value(self, data)`
 
 Dict of native values <- Dict of primitive datatypes.
+
+---
+#### to_representation
+`def to_representation(self, data)`
+
+Object instance -> Dict of primitive datatypes.
 
 ---
 
@@ -631,25 +738,6 @@ Add special filter options
 Currently supports:
 
 - asn: filter by network asn
-
----
-
-## ParentStatusException
-
-```
-ParentStatusException(builtins.OSError)
-```
-
-Throw this when an object cannot be created because its parent is
-either status pending or deleted.
-
-
-### Methods
-
-#### \__init__
-`def __init__(self, parent, typ)`
-
-Initialize self.  See help(type(self)) for accurate signature.
 
 ---
 
@@ -695,7 +783,7 @@ methods.
 ### Methods
 
 #### \__call__
-`def __call__(self, attrs)`
+`def __call__(self, attrs, serializer_field)`
 
 Call self as a function.
 
@@ -725,6 +813,15 @@ Given the *outgoing* object instance, return the primitive value
 that should be used for this field.
 
 ---
+
+## SocialMediaSerializer
+
+```
+SocialMediaSerializer(rest_framework.serializers.Serializer)
+```
+
+Renders the social_media property
+
 
 ## SoftRequiredValidator
 
@@ -765,31 +862,23 @@ address1, address2, zipcode and state are also considered
 if they exist.
 
 
-## UniqueFieldValidator
+### Class Methods
 
-```
-UniqueFieldValidator(builtins.object)
-```
+#### convert_to_spatial_search
+`def convert_to_spatial_search(cls, filters)`
 
-For issue #70:
+Checks if the a single city and country are provided
+in the query and will convert the query to a distance search.
 
-Django-side unique field validation.
+Order of operations:
 
-Ideally this is done in mysql, however the other
-duplicates need to be cleared first, so validate on the django side initially.
-
-
-### Methods
-
-#### \__call__
-`def __call__(self, attrs)`
-
-Call self as a function.
-
----
-#### \__init__
-`def __init__(self, fields, message=None, check_deleted=False)`
-
-Initialize self.  See help(type(self)) for accurate signature.
+1. check if `city` and `country` are provided
+    a. This is also valid if `city__in` or `country__in` contain
+       a single value
+    b. if country is not provided, attempt to retrieve it from
+       the google geocode api result
+2. retrieve the city bounding box via google geocode
+3. set distance on the filters based on the bounding box, turning
+      the query into a spatial distance search.
 
 ---

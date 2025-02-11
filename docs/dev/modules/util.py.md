@@ -1,4 +1,4 @@
-Generated from util.py on 2022-07-15 18:42:55.852692
+Generated from util.py on 2025-02-11 10:26:48.481231
 
 # peeringdb_server.util
 
@@ -7,6 +7,17 @@ Assorted utility functions for peeringdb site templates.
 # Functions
 ---
 
+## add_kmz_overlay_watermark
+`def add_kmz_overlay_watermark(kml)`
+
+add overlay watermark in kmz
+
+Args:
+    kml: Kml
+Returns:
+   None
+
+---
 ## coerce_ipaddr
 `def coerce_ipaddr(value)`
 
@@ -17,30 +28,18 @@ Note: this function is not a validator. If it errors
 It will return the original string.
 
 ---
-# Classes
+## generate_social_media_render_data
+`def generate_social_media_render_data(data, social_media, insert_index, dismiss)`
+
+Generate the data for rendering the social media in view.html.
+This function will insert the generated social media data to `data`.
+
 ---
+## v2_social_media_services
+`def v2_social_media_services()`
 
-## APIPermissionsApplicator
-
-```
-APIPermissionsApplicator(grainy.core.NamespaceKeyApplicator)
-```
-
-Applicator that looks for permission namespaces from
-a specified field in the dict it is scanning
-
-
-### Instanced Attributes
-
-These attributes / properties will be available on instances of the class
-
-- is_generating_api_cache (`@property`): None
-
-### Methods
-
-#### \__init__
-`def __init__(self, user)`
-
-Initialize self.  See help(type(self)) for accurate signature.
+Until v3 website is still set through the main `website` property
+of the object, we need to skip it here so it is not rendered to
+the UX as a pickable choice in the social media dropdown
 
 ---

@@ -1,22 +1,29 @@
-import base64
 import re
 
 import pytest
 from allauth.account.models import EmailAddress
-from django.http import response
 from django.test import Client
+from django.urls import reverse
 from django_grainy.models import Group
+from rest_framework import status
 from rest_framework.test import APIClient
 
+from peeringdb_server import settings as pdb_settings
 from peeringdb_server.models import (
+    EnvironmentSetting,
     Facility,
     InternetExchange,
+    InternetExchangeFacility,
     Network,
+    NetworkFacility,
+    NetworkIXLan,
     Organization,
     User,
     UserAPIKey,
     UserOrgAffiliationRequest,
 )
+from peeringdb_server.permissions import check_permissions_from_request
+from peeringdb_server.views import BASE_ENV
 from tests.util import reset_group_ids
 
 URL = "/affiliate-to-org"
@@ -55,6 +62,12 @@ def assert_failing_affiliation_request(data, client):
     assert response.status_code == 400
     assert "You already requested affiliation to this ASN/org" in str(response.content)
     assert UserOrgAffiliationRequest.objects.count() == 1
+
+
+def assert_failing_affiliation_request_because_of_deletion(data, client, content):
+    response = client.post(URL, data)
+    assert response.status_code == 400
+    assert content in str(response.content)
 
 
 """
@@ -98,6 +111,36 @@ def test_affiliate_to_org_id_takes_precedence_over_asn(client, org):
 def test_affiliate_to_asn_takes_precendence_over_org_name(client, network, org):
     assert_passing_affiliation_request({"org": "test name", "asn": 123}, client)
     assert_failing_affiliation_request({"org": "different", "asn": 123}, client)
+
+
+@pytest.mark.django_db
+def test_affiliate_to_deleted_org(client, org):
+    org.delete()
+    assert_failing_affiliation_request_because_of_deletion(
+        {"org": org.id},
+        client,
+        content="Unable to affiliate as this organization has been deleted",
+    )
+
+
+@pytest.mark.django_db
+def test_affiliate_to_deleted_org_via_network(client, network):
+    network.org.delete()
+    assert_failing_affiliation_request_because_of_deletion(
+        {"asn": 123},
+        client,
+        content="Unable to affiliate as this network has been deleted. Please reach out to PeeringDB support if you wish to resolve this.",
+    )
+
+
+@pytest.mark.django_db
+def test_affiliate_to_deleted_network(client, network):
+    network.delete()
+    assert_failing_affiliation_request_because_of_deletion(
+        {"asn": 123},
+        client,
+        content="Unable to affiliate as this network has been deleted. Please reach out to PeeringDB support if you wish to resolve this.",
+    )
 
 
 @pytest.mark.django_db
@@ -152,7 +195,6 @@ def test_signup_page():
 
 @pytest.mark.django_db
 def test_user_api_key_generation():
-
     user = User.objects.create(username="test", email="test@localhost")
     user.set_password("test1234")
     user.save()
@@ -172,11 +214,56 @@ def test_user_api_key_generation():
 
 @pytest.mark.django_db
 def test_close_account():
-    user = User.objects.create(
-        username="test", email="test@localhost", first_name="Test", last_name="User"
+    reset_group_ids()
+    user = User.objects.create_user(
+        username="test",
+        email="test@localhost",
+        password="test1234",
+        first_name="Test",
+        last_name="User",
+        status="ok",
     )
-    user.set_password("test1234")
+
+    group = Group(name="test group")
+    group.save()
+
+    # add user to group
+    group.user_set.add(user)
+
+    user.set_verified()
+
+    user.status = "ok"
     user.save()
+
+    assert user.status == "ok"
+
+    client = Client()
+    client.login(username="test", password="test1234")
+
+    response = client.post("/user_keys/add", {"name": "test key"})
+    response = client.post("/profile/close", {"password": "test1234"})
+
+    user = User.objects.get(username=f"closed-account-{user.id}")
+    assert user.is_active is False
+    assert client.login(username="test", password="test1234") is False
+    assert UserAPIKey.objects.filter(user=user).count() == 0
+    assert EmailAddress.objects.filter(user=user).count() == 0
+    assert user.groups.count() == 0
+    assert user.email is None
+    assert user.first_name == ""
+    assert user.last_name == ""
+
+
+@pytest.mark.django_db
+def test_close_account_pending_user():
+    reset_group_ids()
+    user = User.objects.create_user(
+        username="test",
+        email="test@localhost",
+        password="test1234",
+        first_name="Test",
+        last_name="User",
+    )
 
     group = Group(name="test group")
     group.save()
@@ -190,15 +277,7 @@ def test_close_account():
     response = client.post("/user_keys/add", {"name": "test key"})
     response = client.post("/profile/close", {"password": "test1234"})
 
-    user = User.objects.get(username="test")
-    assert user.is_active is False
-    assert client.login(username="test", password="test1234") is False
-    assert UserAPIKey.objects.filter(user=user).count() == 0
-    assert EmailAddress.objects.filter(user=user).count() == 0
-    assert user.groups.count() == 0
-    assert user.email == ""
-    assert user.first_name == ""
-    assert user.last_name == ""
+    assert not User.objects.filter(username="test").exists()
 
 
 @pytest.mark.django_db
@@ -244,3 +323,169 @@ def test_pending_view():
 
     response = client.get(f"/fac/{fac.id}")
     assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_healthcheck():
+    client = Client()
+
+    response = client.get("/healthcheck")
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_post_ix_side_net_side(network, org):
+    client = APIClient()
+
+    # Setup data
+    ix = InternetExchange.objects.create(name="Test ix", status="ok", org=org)
+    netixlan = NetworkIXLan.objects.create(
+        network=network,
+        ixlan=ix.ixlan,
+        asn=network.asn,
+        speed=20000,
+        ipaddr4="195.69.147.250",
+        ipaddr6=None,
+        status="ok",
+        is_rs_peer=False,
+        operational=False,
+    )
+
+    fac = Facility.objects.create(name="Test Facility", status="ok", org=org)
+
+    # Check that no facilities are linked initially
+    assert not ix.ixfac_set.filter(status="ok").exists()
+    assert not network.netfac_set.filter(status="ok").exists()
+
+    # Create InternetExchangeFacility and NetworkFacility
+    ix_facility = InternetExchangeFacility.objects.create(
+        facility=fac, ix=ix, status="ok"
+    )
+    net_facility = NetworkFacility.objects.create(
+        facility=fac, network=network, status="ok"
+    )
+
+    assert ix_facility.status == "ok"
+    assert net_facility.status == "ok"
+
+    # Helper function for posting and checking response status
+    def post_and_check(url, fac_id, expected_status):
+        response = client.post(
+            url,
+            {"fac_id": fac_id},
+            format="json",
+        )
+        assert response.status_code == expected_status
+
+    # Helper function to determine expected status based on permissions for network/ix
+    def expected_status(obj, permission_code):
+        request = client.request().wsgi_request
+        if not check_permissions_from_request(request, obj, permission_code):
+            return status.HTTP_403_FORBIDDEN
+        return status.HTTP_200_OK
+
+    # Test set ix_side with permission
+    ix_side_url = f"/api/netixlan/{netixlan.id}/set-ix-side"
+    post_and_check(
+        ix_side_url, fac.id, expected_status(ix, "c")
+    )  # Check permission on IX (InternetExchange)
+
+    # Test set net_side with permission
+    net_side_url = f"/api/netixlan/{netixlan.id}/set-net-side"
+    post_and_check(
+        net_side_url, fac.id, expected_status(network, "c")
+    )  # Check permission on Network
+
+    # Simulate permission denied by removing access
+    client.force_authenticate(user=None)  # Simulate unauthorized user
+
+    # Test setting ix_side with permission denied
+    post_and_check(ix_side_url, fac.id, status.HTTP_403_FORBIDDEN)
+
+    # Test setting net_side with permission denied
+    post_and_check(net_side_url, fac.id, status.HTTP_403_FORBIDDEN)
+
+
+@pytest.mark.django_db
+def test_view_profile_two_factor_email_not_confirmed(client):
+    assert not EmailAddress.objects.filter(
+        email="test@localhost", verified=True
+    ).exists()
+
+    payload = {
+        "two_factor_setup_view-current_step": "welcome",
+    }
+
+    response = client.post(reverse("two_factor:setup"), data=payload)
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "error": "Your email must be confirmed before enabling two-factor authentication."
+    }
+
+
+@pytest.mark.django_db
+def test_view_profile_two_factor_email_confirmed(client):
+    user = User.objects.get(username="test")
+    EmailAddress.objects.create(
+        user=user, email="test@localhost", verified=True, primary=True
+    )
+
+    assert EmailAddress.objects.filter(email="test@localhost", verified=True).exists()
+
+    payload = {
+        "two_factor_setup_view-current_step": "welcome",
+    }
+
+    response = client.post(reverse("two_factor:setup"), data=payload)
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_view_tutorial_banner(client, settings):
+    """
+    Tests that the tutorial banner is shown when TUTORIAL_MODE is True
+    """
+
+    try:
+        settings.TUTORIAL_MODE = True
+        pdb_settings.TUTORIAL_MODE = True
+        BASE_ENV["TUTORIAL_MODE"] = True
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "TUTORIAL MODE" in response.content.decode("utf-8")
+    finally:
+        BASE_ENV["TUTORIAL_MODE"] = False
+        settings.TUTORIAL_MODE = False
+        pdb_settings.TUTORIAL_MODE = False
+
+
+@pytest.mark.django_db
+def test_view_tutorial_banner_text_override(client, settings):
+    """
+    Test that the tutorial banner message can be overridden
+
+    It is overwritten by setting the EnvironmentSetting for TUTORIAL_MODE_MESSAGE
+    """
+
+    try:
+        BASE_ENV["TUTORIAL_MODE"] = True
+        settings.TUTORIAL_MODE = True
+        pdb_settings.TUTORIAL_MODE = True
+
+        EnvironmentSetting.objects.create(
+            setting="TUTORIAL_MODE_MESSAGE",
+            value_str="This is a test message",
+        )
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+
+        assert "TUTORIAL MODE" in response.content.decode("utf-8")
+        assert "This is a test message" in response.content.decode("utf-8")
+    finally:
+        BASE_ENV["TUTORIAL_MODE"] = False
+        settings.TUTORIAL_MODE = False
+        pdb_settings.TUTORIAL_MODE = False

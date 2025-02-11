@@ -1,9 +1,12 @@
 import json
+from unittest.mock import patch
 
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import Group
 from django.test import Client, RequestFactory, TestCase
+from django.urls import reverse
+from django_otp.plugins.otp_totp.models import TOTPDevice
 from grainy.const import *
 
 import peeringdb_server.models as models
@@ -19,7 +22,7 @@ class OrgAdminTests(TestCase):
     affiliation requests
     """
 
-    entities = ["ix", "net", "fac"]
+    entities = ["ix", "net", "fac", "carrier"]
 
     @classmethod
     def setUpTestData(cls):
@@ -101,6 +104,95 @@ class OrgAdminTests(TestCase):
         resp = org_admin.users(request)
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(json.loads(resp.content), {})
+
+    def test_user_options(self):
+        # test updating user options
+
+        assert self.org.restrict_user_emails is False
+        assert self.org.email_domains_list == []
+        assert self.org.periodic_reauth is False
+        assert self.org.periodic_reauth_period == "3m"
+
+        url = reverse("org-admin-user-options")
+
+        request = self.factory.post(
+            url,
+            data={
+                "org_id": self.org.id,
+                "restrict_user_emails": True,
+                "email_domains": "domain.com\nexample.com",
+                "periodic_reauth": True,
+                "periodic_reauth_period": "1m",
+            },
+        )
+        mock_csrf_session(request)
+        request.user = self.org_admin
+
+        resp = org_admin.update_user_options(request)
+        self.assertEqual(json.loads(resp.content).get("status"), "ok")
+
+        self.org.refresh_from_db()
+
+        assert self.org.restrict_user_emails is True
+        assert self.org.email_domains_list == ["domain.com", "example.com"]
+        assert self.org.periodic_reauth is True
+        assert self.org.periodic_reauth_period == "1m"
+
+        # test org admin required
+
+        request = self.factory.post(
+            url,
+            data={
+                "org_id": self.org_other.id,
+                "restrict_user_emails": False,
+                "periodic_reauth": False,
+            },
+        )
+        mock_csrf_session(request)
+        request.user = self.org_admin
+
+        resp = org_admin.update_user_options(request)
+
+        assert resp.status_code == 403
+        assert json.loads(resp.content) == {}
+
+        # test validation
+
+        request = self.factory.post(
+            url,
+            data={
+                "org_id": self.org.id,
+                "email_domains": "invalid",
+                "periodic_reauth_period": "1z",
+            },
+        )
+        mock_csrf_session(request)
+        request.user = self.org_admin
+
+        resp = org_admin.update_user_options(request)
+        assert resp.status_code == 400
+        assert "email_domains" in json.loads(resp.content)
+        assert "periodic_reauth_period" in json.loads(resp.content)
+
+    def test_user_email_restriction_highlight(self):
+        self.org.restrict_user_emails = True
+        self.org.email_domains = "example.com"
+        self.org.save()
+
+        request = self.factory.get(f"/org/{self.org.id}")
+        mock_csrf_session(request)
+        request.user = self.org_admin
+
+        resp = views.view_organization(request, self.org.id)
+
+        assert "Email address requirements not met" in resp.content.decode("utf-8")
+
+        self.org.restrict_user_emails = False
+        self.org.save()
+
+        resp = views.view_organization(request, self.org.id)
+
+        assert "Email address requirements not met" not in resp.content.decode("utf-8")
 
     def test_load_all_user_permissions(self):
         """
@@ -435,11 +527,12 @@ class OrgAdminTests(TestCase):
         self.assertEqual(resp["status"], "ok")
 
         ids = {r["id"]: r["name"] for r in resp["permissions"]}
-        self.assertEqual(len(ids), 7)
+        self.assertEqual(len(ids), 11)
         self.assertIn("org.%d" % self.org.id, ids)
         self.assertIn("ix.%d" % self.ix.id, ids)
         self.assertIn("net.%d" % self.net.id, ids)
         self.assertIn("fac.%d" % self.fac.id, ids)
+        self.assertIn("carrier.%d" % self.carrier.id, ids)
 
         # Test #2 - cannot retrieve ids for other org as we are not admin
         request = self.factory.get(
@@ -457,11 +550,12 @@ class OrgAdminTests(TestCase):
 
         ids = org_admin.permission_ids(self.org)
         self.assertEqual(type(ids), dict)
-        self.assertEqual(len(ids), 7)
+        self.assertEqual(len(ids), 11)
         self.assertIn("org.%d" % self.org.id, ids)
         self.assertIn("ix.%d" % self.ix.id, ids)
         self.assertIn("net.%d" % self.net.id, ids)
         self.assertIn("fac.%d" % self.fac.id, ids)
+        self.assertIn("carrier.%d" % self.carrier.id, ids)
 
     def test_extract_permission_id(self):
         """
@@ -512,6 +606,24 @@ class OrgAdminTests(TestCase):
 
         self.assertEqual({"net": 0x01, "fac": 0x03, "ix": 0x01}, dest)
 
+    def test_uoar_listing(self):
+        """
+        Test that affilation requests are listed correctly
+        """
+
+        # create a user-organization-affiliation-request for user c
+        uoar = models.UserOrgAffiliationRequest.objects.create(
+            user=self.user_c, asn=1, status="pending"
+        )
+
+        request = self.factory.get(f"/org/{uoar.org.id}/")
+        mock_csrf_session(request)
+        request.user = self.org_admin
+
+        resp = views.view_organization(request, uoar.org.id)
+
+        assert "user_c@localhost" in resp.content.decode("utf-8")
+
     def test_uoar_approve(self):
         """
         Test approving of a user-org-affiliation-request
@@ -526,7 +638,12 @@ class OrgAdminTests(TestCase):
         # test that org id was properly derived from network asn
         self.assertEqual(uoar.org.id, self.org.id)
 
-        # test approval
+        # set org.require_2fa to True
+        org = self.org
+        org.require_2fa = True
+        org.save()
+
+        # test approval for user without 2FA request affiliation in organization that require 2FA
         with override_group_id():
             request = self.factory.post(
                 "/org-admin/uoar/approve?org_id=%d" % self.org.id, data={"id": uoar.id}
@@ -534,17 +651,48 @@ class OrgAdminTests(TestCase):
         mock_csrf_session(request)
         request.user = self.org_admin
 
-        resp = json.loads(org_admin.uoar_approve(request).content)
-
+        resp = org_admin.uoar_approve(request)
+        self.assertEqual(resp.status_code, 403)
         self.assertEqual(
+            json.loads(resp.content),
             {
-                "status": "ok",
-                "full_name": self.user_c.full_name,
-                "id": self.user_c.id,
-                "email": self.user_c.email,
+                "message": "User   requests affiliation with Organization Test org but has "
+                "not enabled 2FA. Org Test org does not allow users to affiliate "
+                "unless they have enabled 2FA on their account. You will be able "
+                "to approve an affiliation request from User  , and assign "
+                "permissions to them, when they have enabled 2FA."
             },
-            resp,
         )
+
+        # create user TOTP devices
+        totpdevice = TOTPDevice.objects.create(user=self.user_c, name="default")
+        totpdevice.save()
+
+        admin = models.User.objects.create(
+            username="admintest",
+            first_name="test",
+            last_name="admin",
+        )
+        self.org.admin_usergroup.user_set.add(admin)
+
+        with patch.object(models.User, "email_user") as mock_email_user:
+            # test approval
+            request.user = admin
+            resp = json.loads(org_admin.uoar_approve(request).content)
+            self.assertEqual(
+                {
+                    "status": "ok",
+                    "full_name": self.user_c.full_name,
+                    "id": self.user_c.id,
+                    "email": self.user_c.email,
+                },
+                resp,
+            )
+
+            mock_email_user.assert_called_once()
+            # get the email content
+            email_subject, email_body = mock_email_user.call_args[0][0:2]
+            self.assertIn(admin.full_name, email_body)
 
         # check that user is now a member of the org
         self.assertEqual(
@@ -589,6 +737,73 @@ class OrgAdminTests(TestCase):
         self.assertEqual(json.loads(resp.content), {})
 
         uoar_b.delete()
+
+    def test_handle_2fa(self):
+        """
+        Test handling a user turning off 2FA while they are in an organization that requires it
+        views.handle_2fa
+        """
+        org = self.org
+        org_other = self.org_other
+        member = self.user_c
+        org.usergroup.user_set.add(self.user_c)
+        actions = ["leave", "disable", "drop"]
+        settings.CSRF_USE_SESSIONS = False
+
+        # check if request.user is not admin of the organization and member is not the member of the organization
+        request = self.factory.get(
+            f"/org_admin/handle-2fa?org={org_other.id}&member={member.id}&action={actions[0]}&commit=1"
+        )
+        mock_csrf_session(request)
+        request.user = self.org_admin
+        resp = views.handle_2fa(request)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(
+            f"Only admin of the {org_other} can perform the action".encode(),
+            resp.content,
+        )
+
+        # confirming dialog before perform the action
+        for action in actions:
+            request = self.factory.get(
+                f"/org_admin/handle-2fa?org={org.id}&member={member.id}&action={action}"
+            )
+            mock_csrf_session(request)
+            request.user = self.org_admin
+            resp = views.handle_2fa(request)
+            self.assertEqual(resp.status_code, 200)
+            if action == "leave":
+                self.assertIn(
+                    f"This will allow {member} to keep all privileges within {org}. This conflicts with your 2FA Policy".encode(),
+                    resp.content,
+                )
+            if action == "disable":
+                self.assertIn(
+                    f"This will turn off the 2FA requirement for {org}, users will not need to use 2FA to login".encode(),
+                    resp.content,
+                )
+            if action == "drop":
+                self.assertIn(
+                    f"This will completely remove {member} from {org}".encode(),
+                    resp.content,
+                )
+
+        # after agree in the confirming dialog
+        for action in actions:
+            request = self.factory.get(
+                f"/org_admin/handle-2fa?org={org.id}&member={member.id}&action={action}&commit=1"
+            )
+            mock_csrf_session(request)
+            request.user = self.org_admin
+            resp = views.handle_2fa(request)
+            self.assertEqual(resp.status_code, 302)
+            if action == "leave":
+                self.assertIn(member, org.usergroup.user_set.all())
+            if action == "disable":
+                self.assertFalse(org.require_2fa)
+            if action == "drop":
+                self.assertNotIn(member, org.usergroup.user_set.all())
+        settings.CSRF_USE_SESSIONS = True
 
     def test_uoar_deny(self):
         """

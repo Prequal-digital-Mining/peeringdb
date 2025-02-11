@@ -1,16 +1,18 @@
 import datetime
 import json
-import os
 import urllib
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.contrib.messages import get_messages
 from django.core.management import call_command
 from django.test import Client, RequestFactory, TestCase
-from django.urls import resolve, reverse
+from django.urls import reverse
 from django.utils import timezone
-from django_grainy.models import GroupPermission, UserPermission
+from django_grainy.models import GroupPermission
+from django_otp.plugins.otp_totp.models import TOTPDevice
+from django_security_keys.models import SecurityKey
 
 import peeringdb_server.admin as admin
 import peeringdb_server.models as models
@@ -25,7 +27,12 @@ class AdminTests(TestCase):
 
     @classmethod
     def entity_data(cls, org, tag):
-        kwargs = {"name": f"{org.name} {tag}", "status": "ok", "org": org}
+        kwargs = {
+            "name": f"{org.name} {tag}",
+            "status": "ok",
+            "org": org,
+            "website": "",
+        }
         if tag == "net":
             cls.asn_count += 1
             kwargs.update(asn=cls.asn_count)
@@ -33,7 +40,6 @@ class AdminTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-
         cls.entities = {}
 
         # set up organizations
@@ -46,7 +52,7 @@ class AdminTests(TestCase):
         ]
 
         # set up a network,facility and ix under each org
-        for tag in ["ix", "net", "fac"]:
+        for tag in ["ix", "net", "fac", "carrier", "campus"]:
             cls.entities[tag] = [
                 models.REFTAG_MAP[tag].objects.create(**cls.entity_data(org, tag))
                 for org in cls.entities["org"]
@@ -55,8 +61,8 @@ class AdminTests(TestCase):
         # create a user under each org
         cls.entities["user"] = [
             models.User.objects.create_user(
-                "user " + org.name,
-                "%s@localhost" % org.name,
+                username="user " + org.name,
+                email="%s@localhost" % org.name,
                 first_name="First",
                 last_name="Last",
             )
@@ -68,7 +74,10 @@ class AdminTests(TestCase):
             i += 1
 
         cls.admin_user = models.User.objects.create_user(
-            "admin", "admin@localhost", first_name="admin", last_name="admin"
+            username="admin",
+            email="admin@localhost",
+            first_name="admin",
+            last_name="admin",
         )
         cls.admin_user.is_superuser = True
         cls.admin_user.is_staff = True
@@ -78,7 +87,10 @@ class AdminTests(TestCase):
 
         # user and group for read-only access to /cp
         cls.readonly_admin = models.User.objects.create_user(
-            "ro_admin", "ro_admin@localhost", password="admin", is_staff=True
+            username="ro_admin",
+            email="ro_admin@localhost",
+            password="admin",
+            is_staff=True,
         )
         readonly_group = Group.objects.create(name="readonly")
         for app_label in admin.PERMISSION_APP_LABELS:
@@ -111,6 +123,15 @@ class AdminTests(TestCase):
                 speed=1000,
             )
             for addr in ["207.41.110.37", "207.41.110.38", "207.41.110.39"]
+        ]
+
+        # set up carrier facility presences
+        cls.entities["carrierfac"] = [
+            models.CarrierFacility.objects.create(
+                carrier=cls.entities["carrier"][0],
+                facility=cls.entities["fac"][0],
+                status="ok",
+            )
         ]
 
     def setUp(self):
@@ -406,7 +427,6 @@ class AdminTests(TestCase):
         self.assertEqual(str(self.entities["netixlan"][2].ipaddr4), "207.41.111.39")
 
     def test_netixlan_inline(self):
-
         """
         test that inline netixlan admin forms can handle blank
         values in ipaddress fields (#644)
@@ -419,10 +439,7 @@ class AdminTests(TestCase):
         netixlan_b = ixlan.netixlan_set.all()[1]
 
         url = reverse(
-            "admin:{}_{}_change".format(
-                ixlan._meta.app_label,
-                ixlan._meta.object_name,
-            ).lower(),
+            f"admin:{ixlan._meta.app_label}_{ixlan._meta.object_name}_change".lower(),
             args=(ixlan.id,),
         )
 
@@ -430,7 +447,6 @@ class AdminTests(TestCase):
         client.force_login(self.admin_user)
 
         def post_data(ipaddr4, ipaddr6):
-
             """
             helper function that builds data to send to
             the ixlan django admin form with inline
@@ -443,6 +459,7 @@ class AdminTests(TestCase):
                 "ixf_ixp_member_list_url_visible": "Private",
                 "ix": ixlan.ix.id,
                 "status": ixlan.status,
+                "mtu": 1500,
                 # required management form data
                 "ixpfx_set-TOTAL_FORMS": 0,
                 "ixpfx_set-INITIAL_FORMS": 0,
@@ -476,7 +493,7 @@ class AdminTests(TestCase):
         response = client.post(url, post_data(netixlan_b.ipaddr4, netixlan_b.ipaddr6))
         assert netixlan.ipaddr6 is None
         assert netixlan.ipaddr4 is None
-        assert "Ip address already exists elsewhere" in response.content.decode("utf-8")
+        assert "IP already exists" in response.content.decode("utf-8")
 
     def _run_regex_search(self, model, search_term):
         c = Client()
@@ -524,6 +541,25 @@ class AdminTests(TestCase):
         for e in expected_not:
             assert e not in content
 
+    def test_search_network_prefixed(self):
+        expected = [
+            f'Org {i} net</a></th><td class="field-asn">{i+1}</td>' for i in range(0, 9)
+        ]
+        for i, e in enumerate(expected):
+            ## AS prefix
+            content_as = self._run_regex_search("network", f"AS{i+1}")
+            assert e in content_as
+
+            for x in set(expected) - {expected[i]}:
+                assert x not in content_as
+
+            ## ASN prefix
+            content_asn = self._run_regex_search("network", f"ASN{i+1}")
+            assert e in content_asn
+
+            for x in set(expected) - {expected[i]}:
+                assert x not in content_asn
+
     def test_all_views_readonly(self):
         self._test_all_views(
             self.readonly_admin,
@@ -537,13 +573,35 @@ class AdminTests(TestCase):
     def test_all_views_superuser(self):
         self._test_all_views(self.admin_user)
 
+    def test_superuser_search(self):
+        urls = [
+            "/cp/django_security_keys/securitykey/?q=example",
+            "/cp/peeringdb_server/commandlinetool/?q=example",
+            "/cp/peeringdb_server/datachangeemail/?q=example",
+            "/cp/peeringdb_server/datachangenotificationqueue/?q=example",
+            "/cp/peeringdb_server/datachangewatchedobject/?q=example",
+            "/cp/peeringdb_server/geocoordinatecache/?q=example",
+            # "/cp/peeringdb_server/oauthapplication/?q=example",  # This route doesn't exist with the default OAuth provider application under the test environment. Needs to be peeringdb_server.OAuthApplication
+            "/cp/peeringdb_server/partnership/?q=example",
+            "/cp/peeringdb_server/sponsorship/?q=example",
+        ]
+
+        client = Client()
+        client.force_login(self.admin_user)
+        assert self.admin_user.is_staff
+
+        for url in urls:
+            fn = getattr(client, "get")
+            response = fn(url, follow=True)
+            assert response.status_code == 200
+
     def _test_all_views(self, user, **kwargs):
         call_command("pdb_generate_test_data", limit=2, commit=True)
 
         # create a verification queue item we can check
         org = models.Organization.objects.all().first()
-        net = models.Network.objects.create(
-            name="Unverified network", org=org, asn=33333, status="pending"
+        _ = models.Facility.objects.create(
+            name="Unverified facility", org=org, status="pending"
         )
         vqitem = models.VerificationQueueItem.objects.all().first()
         assert vqitem
@@ -553,9 +611,9 @@ class AdminTests(TestCase):
         models.SponsorshipOrganization.objects.create(sponsorship=sponsorship, org=org)
 
         # create partnership we can check
-        partnership = models.Partnership.objects.create(org=org)
+        _ = models.Partnership.objects.create(org=org)
 
-        # create ixlan ix-f import log we can check
+        # create ixlan IX-F import log we can check
         ixfmemberdata = models.IXFMemberData.instantiate(
             ixlan=models.NetworkIXLan.objects.first().ixlan,
             ipaddr4=models.NetworkIXLan.objects.first().ipaddr4,
@@ -564,18 +622,18 @@ class AdminTests(TestCase):
         )
         ixfmemberdata.save()
 
-        # create ixlan ix-f import log we can check
-        importlog = models.IXLanIXFMemberImportLog.objects.create(
+        # create ixlan IX-F import log we can check
+        _ = models.IXLanIXFMemberImportLog.objects.create(
             ixlan=models.IXLan.objects.all().first()
         )
 
         # create user to organization affiliation request
-        affil = models.UserOrgAffiliationRequest.objects.create(
+        _ = models.UserOrgAffiliationRequest.objects.create(
             org=org, user=self.readonly_admin
         )
 
         # create command line tool instance
-        cmdtool = models.CommandLineTool.objects.create(
+        _ = models.CommandLineTool.objects.create(
             user=self.readonly_admin, arguments="{}", tool="pdb_renumber_lans"
         )
 
@@ -598,6 +656,8 @@ class AdminTests(TestCase):
             models.NetworkContact,
             models.IXLan,
             models.IXLanPrefix,
+            models.Carrier,
+            models.CarrierFacility,
             models.User,
             models.UserOrgAffiliationRequest,
             models.Sponsorship,
@@ -663,14 +723,13 @@ class AdminTests(TestCase):
 
         assert user.is_staff
 
-        search_str = '<a href="/cp/logout/"'
+        search_str = 'action="/cp/logout/"'
 
         for op in ops:
             for cls in classes:
                 args = None
 
                 if op == "change":
-
                     # change op required object id
 
                     args = (cls.objects.all().first().id,)
@@ -679,20 +738,19 @@ class AdminTests(TestCase):
                         continue
 
                 elif op == "add":
-
                     if cls in ignore_add:
                         continue
 
                 url = reverse(
-                    "admin:{}_{}_{}".format(
-                        cls._meta.app_label, cls._meta.object_name, op
-                    ).lower(),
+                    f"admin:{cls._meta.app_label}_{cls._meta.object_name}_{op}".lower(),
                     args=args,
                 )
                 response = client.get(url)
                 cont = response.content.decode("utf-8")
                 assert response.status_code == kwargs.get(f"status_{op}", 200)
                 if response.status_code == 200:
+                    print(cont)
+                    print(url)
                     assert search_str in cont
 
         for url, method, status in extra_urls:
@@ -719,9 +777,7 @@ class AdminTests(TestCase):
 
         cls = models.Organization
         url = reverse(
-            "admin:{}_{}_changelist".format(
-                cls._meta.app_label, cls._meta.object_name
-            ).lower(),
+            f"admin:{cls._meta.app_label}_{cls._meta.object_name}_changelist".lower(),
         )
         response = client.get(f"{url}?sz={sz}")
         cont = response.content.decode("utf-8")
@@ -751,6 +807,8 @@ class AdminTests(TestCase):
             "ix",
             "net",
             "ixlan",
+            "carrier",
+            "campus",
         ]
 
         # we also do auto complete on user relationships
@@ -832,7 +890,7 @@ class AdminTests(TestCase):
         client.force_login(self.admin_user)
 
         user = models.User.objects.first()
-        uoar = models.UserOrgAffiliationRequest.objects.create(
+        _ = models.UserOrgAffiliationRequest.objects.create(
             user=user, asn=1, status="pending"
         )
 
@@ -899,7 +957,9 @@ class AdminTests(TestCase):
         Test that userpermission is sane
         """
 
-        user_permission = admin.UserPermission.objects.create(username="user")
+        user_permission = get_user_model().objects.create_user(
+            username="user", email="user@localhost", password="user"
+        )
 
         org = models.Organization.objects.create(name="test-org", status="ok")
         org.admin_usergroup.user_set.add(user_permission)
@@ -955,5 +1015,48 @@ class AdminTests(TestCase):
 
         assert response.status_code == 200
 
-        # assert that the there are 0 grainy permissions
+        # assert that the there are 1 grainy permissions
         assert len(user_permission.grainy_permissions.all()) == 1
+
+    def test_get_user_change_form_with_inline_fields(self):
+        """
+        Test load page for TOTP devices and Webauthn Security Keys inline form fields
+        """
+
+        userchange = get_user_model().objects.create_user(
+            username="user", email="user@localhost", password="user"
+        )
+
+        # create user TOTP devices
+        totpdevice = TOTPDevice.objects.create(user=userchange, name="default")
+        totpdevice.save()
+
+        # create user to Webauthn Security Keys
+        securitykey = SecurityKey.objects.create(
+            name="test",
+            type="security-key",
+            user=userchange,
+            credential_id="1234",
+            credential_public_key="deadbeef",
+        )
+        securitykey.save()
+
+        client = Client()
+        client.force_login(self.admin_user)
+
+        url = reverse("admin:peeringdb_server_user_change", args=[userchange.id])
+        response = client.get(url, follow=True)
+
+        assert response.status_code == 200
+        page = response.content.decode()
+        # check the topt device is listed
+        assert (
+            '<h2 class="grp-collapse-handler">User has these TOTP devices</h2>' in page
+        )
+        assert f'name="totpdevice_set-0-key" value="{totpdevice.key}"' in page
+        # check the security key device is listed
+        assert (
+            '<h2 class="grp-collapse-handler">User has these Webauthn Security Keys</h2>'
+            in page
+        )
+        assert 'name="webauthn_security_keys-0-credential_id" value="1234"' in page

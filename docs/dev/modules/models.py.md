@@ -1,4 +1,4 @@
-Generated from models.py on 2022-07-15 18:42:55.852692
+Generated from models.py on 2025-02-11 10:26:48.481231
 
 # peeringdb_server.models
 
@@ -79,10 +79,122 @@ if any fail the permission check False is returned.
 # Classes
 ---
 
+## Campus
+
+```
+Campus(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.CampusBase, peeringdb_server.models.SocialMediaMixin, peeringdb_server.models.StripFieldMixin)
+```
+
+Describes a peeringdb campus
+
+
+### Instanced Attributes
+
+These attributes / properties will be available on instances of the class
+
+- city (`@property`): Return city of related facility object
+- country (`@property`): Return country of related facility object
+- grainy_namespace (`@property`): None
+- latitude (`@property`): Return latitude of related facility object
+- longitude (`@property`): Return longitude of related facility object
+- search_result_name (`@property`): This will be the name displayed for quick search matches
+of this entity.
+- state (`@property`): Return state of related facility object
+- view_url (`@property`): Return the URL to this campus's web view.
+- zipcode (`@property`): Return zipcode of related facility object
+
+### Class Methods
+
+#### related_to_facility
+`def related_to_facility(cls, value=None, filt=None, field=fac_set__id, qset=None)`
+
+Filter queryset of campus objects related to facilities with name match
+in fac_set__id according to filter.
+
+Relationship through facility.
+
+---
+
+### Methods
+
+#### save
+`def save(self, *args, **kwargs)`
+
+Save the current instance
+
+---
+
+## Carrier
+
+```
+Carrier(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.CarrierBase, peeringdb_server.models.SocialMediaMixin, peeringdb_server.models.StripFieldMixin)
+```
+
+Describes a carrier object.
+
+
+### Instanced Attributes
+
+These attributes / properties will be available on instances of the class
+
+- carrierfac_set_active (`@property`): Returns queryset of active CarrierFacility objects connected to this
+carrier.
+- grainy_namespace (`@property`): None
+- search_result_name (`@property`): This will be the name displayed for quick search matches
+of this entity.
+- sponsorship (`@property`): Returns sponsorship oject for this carrier (through the owning org).
+- view_url (`@property`): Return the URL to this carrier's web view.
+
+## CarrierFacility
+
+```
+CarrierFacility(django_peeringdb.models.abstract.CarrierFacilityBase, peeringdb_server.models.StripFieldMixin)
+```
+
+Describes a carrier <-> facility relationship.
+
+
+### Instanced Attributes
+
+These attributes / properties will be available on instances of the class
+
+- descriptive_name (`@property`): Returns a descriptive label of the netfac for logging purposes.
+- grainy_namespace (`@property`): None
+
+### Class Methods
+
+#### related_to_city
+`def related_to_city(cls, value=None, filt=None, field=facility__city, qset=None)`
+
+Filter queryset of carrierfac objects related to city via match
+in facility__city according to filter.
+
+Relationship through facility.
+
+---
+#### related_to_country
+`def related_to_country(cls, value=None, filt=None, field=facility__country, qset=None)`
+
+Filter queryset of carrierfac objects related to country via match
+in facility__country according to filter.
+
+Relationship through facility.
+
+---
+#### related_to_name
+`def related_to_name(cls, value=None, filt=None, field=facility__name, qset=None)`
+
+Filter queryset of carrierfac objects related to facilities with name match
+in facility__name according to filter.
+
+Relationship through facility.
+
+---
+
 ## CommandLineTool
 
 ```
-CommandLineTool(django.db.models.base.Model)
+CommandLineTool(peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes command line tool execution by a staff user inside the
@@ -101,7 +213,7 @@ Return str(self).
 ## DataChangeEmail
 
 ```
-DataChangeEmail(django.db.models.base.Model)
+DataChangeEmail(peeringdb_server.models.StripFieldMixin)
 ```
 
 DataChangeEmail(id, user, watched_object, email, content, subject, created, sent)
@@ -110,7 +222,7 @@ DataChangeEmail(id, user, watched_object, email, content, subject, created, sent
 ## DataChangeNotificationQueue
 
 ```
-DataChangeNotificationQueue(django.db.models.base.Model)
+DataChangeNotificationQueue(peeringdb_server.models.StripFieldMixin)
 ```
 
 DataChangeNotificationQueue(id, watched_ref_tag, watched_object_id, ref_tag, object_id, reason, version_before, version_after, action, source, created)
@@ -149,7 +261,7 @@ older than this date will be ignored)
 ## DataChangeWatchedObject
 
 ```
-DataChangeWatchedObject(django.db.models.base.Model)
+DataChangeWatchedObject(peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes a user's intention to be notified about
@@ -214,7 +326,7 @@ Return str(self).
 ## DeskProTicket
 
 ```
-DeskProTicket(django.db.models.base.Model)
+DeskProTicket(peeringdb_server.models.StripFieldMixin)
 ```
 
 DeskProTicket(id, subject, body, user, email, created, published, deskpro_ref, deskpro_id)
@@ -223,16 +335,25 @@ DeskProTicket(id, subject, body, user, email, created, published, deskpro_ref, d
 ## DeskProTicketCC
 
 ```
-DeskProTicketCC(django.db.models.base.Model)
+DeskProTicketCC(peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes a contact to be cc'd on the deskpro ticket.
 
 
+## EmailAddressData
+
+```
+EmailAddressData(peeringdb_server.models.StripFieldMixin)
+```
+
+EmailAddressData(id, email, confirmed_date)
+
+
 ## EnvironmentSetting
 
 ```
-EnvironmentSetting(django.db.models.base.Model)
+EnvironmentSetting(peeringdb_server.models.StripFieldMixin)
 ```
 
 Environment settings overrides controlled through
@@ -285,7 +406,7 @@ Update the value for this setting.
 ## Facility
 
 ```
-Facility(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.FacilityBase, peeringdb_server.models.GeocodeBaseMixin)
+Facility(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.FacilityBase, peeringdb_server.models.GeocodeBaseMixin, peeringdb_server.models.ParentStatusCheckMixin, peeringdb_server.models.SocialMediaMixin, peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes a peeringdb facility.
@@ -295,6 +416,8 @@ Describes a peeringdb facility.
 
 These attributes / properties will be available on instances of the class
 
+- carrierfac_set_active (`@property`): Returns queryset of active CarrierFacility objects connected
+to this facility.
 - deletable (`@property`): Returns whether or not the facility is currently
 in a state where it can be marked as deleted.
 
@@ -381,10 +504,19 @@ Relationship through netfac -> net
 
 ---
 
+### Methods
+
+#### save
+`def save(self, *args, **kwargs)`
+
+Save the current instance
+
+---
+
 ## GeoCoordinateCache
 
 ```
-GeoCoordinateCache(django.db.models.base.Model)
+GeoCoordinateCache(peeringdb_server.models.StripFieldMixin)
 ```
 
 Stores geocoordinates for address lookups.
@@ -409,6 +541,13 @@ These attributes / properties will be available on instances of the class
 
 ### Methods
 
+#### clean
+`def clean(self)`
+
+As per #1482 the floor field is being deprecated
+and only empty values are allowed.
+
+---
 #### process_geo_location
 `def process_geo_location(self, geocode=True, save=True)`
 
@@ -422,7 +561,7 @@ data.
 ## IXFImportEmail
 
 ```
-IXFImportEmail(django.db.models.base.Model)
+IXFImportEmail(peeringdb_server.models.StripFieldMixin)
 ```
 
 A copy of all emails sent by the IX-F importer.
@@ -431,10 +570,10 @@ A copy of all emails sent by the IX-F importer.
 ## IXFMemberData
 
 ```
-IXFMemberData(django_peeringdb.models.abstract.NetworkIXLanBase)
+IXFMemberData(django_peeringdb.models.abstract.NetworkIXLanBase, peeringdb_server.models.StripFieldMixin)
 ```
 
-Describes a potential data update that arose during an ix-f import
+Describes a potential data update that arose during an IX-F import
 attempt for a specific member (asn, ip4, ip6) to netixlan
 (asn, ip4, ip6) where the importer could not complete the
 update automatically.
@@ -485,14 +624,14 @@ this entry.
 - ix_contacts (`@property`): Returns a list of email addresses that
 are suitable contact points for conflict resolution
 at the exchange end.
-- ixf_id (`@property`): Returns a tuple that identifies the ix-f member
+- ixf_id (`@property`): Returns a tuple that identifies the IX-F member
 as a unqiue record by asn, ip4 and ip6 address.
 - ixf_id_pretty_str (`@property`): None
 - json (`@property`): Returns dict for self.data
 - marked_for_removal (`@property`): Returns whether or not this entry implies that
 the related netixlan should be removed.
 
-We do this by checking if the ix-f data was provided
+We do this by checking if the IX-F data was provided
 or not.
 - modify_is_rs_peer (`@property`): Returns whether or not the `is_rs_peer` property
 is enabled to receive modify updates or not (#793).
@@ -539,7 +678,7 @@ If an empty dict is returned that means no changes.
 had data at the IX-F source.
 
 If not it indicates that it does not exist at the
-ix-f source.
+IX-F source.
 - requirements (`@property`): Returns list of all IXFMemberData objects
 that are still active requirements for this
 IXFMemberData object.
@@ -757,7 +896,7 @@ instance to ac, ix and net as warranted.
 #### validate_speed
 `def validate_speed(self)`
 
-Speed errors in ix-f data are raised during parse
+Speed errors in IX-F data are raised during parse
 and speed will be on the attribute.
 
 In order to properly handle invalid speed values,
@@ -771,7 +910,7 @@ TODO: find a better way to do this.
 ## IXLan
 
 ```
-IXLan(django_peeringdb.models.abstract.IXLanBase)
+IXLan(django_peeringdb.models.abstract.IXLanBase, peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes a LAN at an exchange.
@@ -786,6 +925,8 @@ These attributes / properties will be available on instances of the class
 - ixpfx_set_active (`@property`): Returns queryset of active prefixes at this ixlan.
 - ixpfx_set_active_or_pending (`@property`): Returns queryset of active or pending prefixes at this ixlan.
 - netixlan_set_active (`@property`): Returns queryset of active netixlan objects at this ixlan.
+- ready_for_ixf_import (`@property`): Returns True if IX-F data is ready to be imported.
+- view_url (`@property`): Return the URL to related networks web view.
 
 ### Class Methods
 
@@ -811,7 +952,7 @@ Argument(s):
 ### Methods
 
 #### add_netixlan
-`def add_netixlan(*args, **kwds)`
+`def add_netixlan(self, netixlan_info, save=True, save_others=True)`
 
 This function allows for sane adding of netixlan object under
 this ixlan.
@@ -863,7 +1004,7 @@ Test that the ipv6 address exists in one of the prefixes in this ixlan.
 ## IXLanIXFMemberImportAttempt
 
 ```
-IXLanIXFMemberImportAttempt(django.db.models.base.Model)
+IXLanIXFMemberImportAttempt(peeringdb_server.models.StripFieldMixin)
 ```
 
 Holds information about the most recent ixf member import
@@ -873,7 +1014,7 @@ attempt for an ixlan.
 ## IXLanIXFMemberImportLog
 
 ```
-IXLanIXFMemberImportLog(django.db.models.base.Model)
+IXLanIXFMemberImportLog(peeringdb_server.models.StripFieldMixin)
 ```
 
 Import log of a IX-F member import that changed or added at least one
@@ -883,7 +1024,7 @@ netixlan under the specified ixlans.
 ### Methods
 
 #### rollback
-`def rollback(*args, **kwds)`
+`def rollback(self)`
 
 Attempt to rollback the changes described in this log.
 
@@ -892,7 +1033,7 @@ Attempt to rollback the changes described in this log.
 ## IXLanIXFMemberImportLogEntry
 
 ```
-IXLanIXFMemberImportLogEntry(django.db.models.base.Model)
+IXLanIXFMemberImportLogEntry(peeringdb_server.models.StripFieldMixin)
 ```
 
 IX-F member import log entry that holds the affected netixlan and
@@ -905,14 +1046,14 @@ the change.
 These attributes / properties will be available on instances of the class
 
 - changes (`@property`): Returns a dict of changes between the netixlan version
-saved by the ix-f import and the version before.
+saved by the IX-F import and the version before.
 
 Fields `created`, `updated` and `version` will be ignored.
 
 ## IXLanPrefix
 
 ```
-IXLanPrefix(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.IXLanPrefixBase)
+IXLanPrefix(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.IXLanPrefixBase, peeringdb_server.models.StripFieldMixin)
 ```
 
 Descries a Prefix at an Exchange LAN.
@@ -922,14 +1063,6 @@ Descries a Prefix at an Exchange LAN.
 
 These attributes / properties will be available on instances of the class
 
-- deletable (`@property`): Returns whether or not the prefix is currently
-in a state where it can be marked as deleted.
-
-This will be False for prefixes of which ANY
-of the following is True:
-
-- parent ixlan has netixlans that fall into
-  its address space
 - descriptive_name (`@property`): Returns a descriptive label of the ixpfx for logging purposes.
 - grainy_namespace (`@property`): None
 - ix_id (`@property`): None
@@ -990,7 +1123,7 @@ Returns:
 ## InternetExchange
 
 ```
-InternetExchange(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.InternetExchangeBase)
+InternetExchange(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.InternetExchangeBase, peeringdb_server.models.ParentStatusCheckMixin, peeringdb_server.models.SocialMediaMixin, peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes a peeringdb exchange.
@@ -1154,6 +1287,19 @@ by this method will not be associated with a particular field; it will
 have a special-case association with the field defined by NON_FIELD_ERRORS.
 
 ---
+#### peer_exists_in_ixf_data
+`def peer_exists_in_ixf_data(self, asn, ipaddr4, ipaddr6)`
+
+Checks if the combination of ip-address and asn exists
+in the internet exchange's IX-F data.
+
+Arguments:
+
+- asn (`int`)
+- ipaddr4 (`str`|`ipaddress.ip_address`)
+- ipaddr6 (`str`|`ipaddress.ip_address`)
+
+---
 #### save
 `def save(self, create_ixlan=True, **kwargs)`
 
@@ -1177,7 +1323,7 @@ queue.
 ## InternetExchangeFacility
 
 ```
-InternetExchangeFacility(django_peeringdb.models.abstract.InternetExchangeFacilityBase)
+InternetExchangeFacility(django_peeringdb.models.abstract.InternetExchangeFacilityBase, peeringdb_server.models.ParentStatusCheckMixin, peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes facility to exchange relationship.
@@ -1220,10 +1366,19 @@ Relationship through facility.
 
 ---
 
+### Methods
+
+#### save
+`def save(self, *args, **kwargs)`
+
+Save the current instance
+
+---
+
 ## Network
 
 ```
-Network(django_peeringdb.models.abstract.NetworkBase)
+Network(django_peeringdb.models.abstract.NetworkBase, peeringdb_server.models.ParentStatusCheckMixin, peeringdb_server.models.SocialMediaMixin, peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes a peeringdb network.
@@ -1234,12 +1389,16 @@ Describes a peeringdb network.
 These attributes / properties will be available on instances of the class
 
 - grainy_namespace (`@property`): None
+- info_type (`@property`): None
 - ipv4_support (`@property`): None
 - ipv6_support (`@property`): None
 - ixlan_set_active (`@property`): Returns IXLan queryset for ixlans connected to this network
 through NetworkIXLan.
 - ixlan_set_ixf_enabled (`@property`): Returns IXLan queryset for IX-F import enabled ixlans connected
 to this network through NetworkIXLan.
+- ixlan_set_ixf_enabled_with_suggestions (`@property`): Returns IXLan queryset for IX-F import enabled ixlans connected
+to this network through NetworkIXLan. Only contains ixlans that
+have active suggestions for the network.
 - netfac_set_active (`@property`): None
 - netixlan_set_active (`@property`): None
 - poc_set_active (`@property`): None
@@ -1257,8 +1416,20 @@ of this entity.
 Returns a dict mapping asns to their irr_as_set value.
 
 ---
+#### automated_net_count
+`def automated_net_count(cls)`
+
+Class method that retrieves all Networks with allow_ixp_update=True.
+
+Args:
+None just returns a count of total automated_nets.
+
+Returns:
+A queryset of Network objects that match allow_ixp_update=True and status=ok .
+
+---
 #### create_from_rdap
-`def create_from_rdap(*args, **kwds)`
+`def create_from_rdap(cls, rdap, asn, org)`
 
 Creates network from rdap result object.
 
@@ -1335,11 +1506,27 @@ Relationship through netixlan.
 Custom model validation.
 
 ---
+#### delete
+`def delete(self, *args, **kwargs)`
+
+Delete the Network instance.
+
+This method ensures that all related NetworkContact instances are deleted with
+the `deleting_network` flag set to True, which allows the contacts to be deleted
+regardless of their current state.
+
+---
+#### save
+`def save(self, *args, **kwargs)`
+
+Save the current instance
+
+---
 
 ## NetworkContact
 
 ```
-NetworkContact(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.ContactBase)
+NetworkContact(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.ContactBase, peeringdb_server.models.ParentStatusCheckMixin, peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes a contact point (phone, email etc.) for a network.
@@ -1357,6 +1544,7 @@ technical contact point for a network that has
 active netixlans. (#923)
 - grainy_namespace (`@property`): None
 - is_tech_contact (`@property`): None
+- view_url (`@property`): Return the URL to related networks web view.
 
 ### Methods
 
@@ -1369,11 +1557,28 @@ by this method will not be associated with a particular field; it will
 have a special-case association with the field defined by NON_FIELD_ERRORS.
 
 ---
+#### delete
+`def delete(self, *args, **kwargs)`
+
+Delete the NetworkContact instance.
+
+This method sets the `_deleting_network` attribute to indicate whether
+the deletion is part of a parent network deletion or not. If `deleting_network`
+is passed as True in the kwargs, it indicates that the parent network is
+being deleted, allowing the contact to be deleted regardless of its current state.
+
+---
+#### save
+`def save(self, *args, **kwargs)`
+
+Save the current instance
+
+---
 
 ## NetworkFacility
 
 ```
-NetworkFacility(django_peeringdb.models.abstract.NetworkFacilityBase)
+NetworkFacility(django_peeringdb.models.abstract.NetworkFacilityBase, peeringdb_server.models.ParentStatusCheckMixin, peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes a network <-> facility relationship.
@@ -1427,11 +1632,17 @@ by this method will not be associated with a particular field; it will
 have a special-case association with the field defined by NON_FIELD_ERRORS.
 
 ---
+#### save
+`def save(self, *args, **kwargs)`
+
+Save the current instance
+
+---
 
 ## NetworkIXLan
 
 ```
-NetworkIXLan(django_peeringdb.models.abstract.NetworkIXLanBase)
+NetworkIXLan(django_peeringdb.models.abstract.NetworkIXLanBase, peeringdb_server.models.ParentStatusCheckMixin, peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes a network relationship to an IX through an IX Lan.
@@ -1454,7 +1665,7 @@ DataChangeNotificationQueue
 - ix_result_name (`@property`): None
 - ix_sub_result_name (`@property`): None
 - ixf_id (`@property`): Returns a tuple that identifies the netixlan
-in the context of an ix-f member data entry as a unqiue record by asn, ip4 and ip6 address.
+in the context of an IX-F member data entry as a unqiue record by asn, ip4 and ip6 address.
 - ixf_id_pretty_str (`@property`): None
 - name (`@property`): None
 - net_id (`@property`): None
@@ -1505,16 +1716,48 @@ Return the netixlan's ipaddr for ip version.
 
 ---
 #### ipaddress_conflict
-`def ipaddress_conflict(self)`
+`def ipaddress_conflict(self, check_deleted=False)`
 
 Checks whether the ip addresses specified on this netixlan
 exist on another netixlan (with status="ok").
+
+Arguments
+
+- check_deleted (`bool`) - if True also look for conflicts in deleted
 
 Returns:
     - tuple(bool, bool): tuple of two booleans, first boolean is
         true if there was a conflict with the ip4 address, second
         boolean is true if there was a conflict with the ip6
         address
+
+---
+#### save
+`def save(self, *args, **kwargs)`
+
+Save the current instance
+
+---
+#### validate_ip_conflicts
+`def validate_ip_conflicts(self, check_deleted=False)`
+
+Validates whether the ip addresses specified on this netixlan
+are conflicting with any other netixlans.
+
+Will raise a `ValidationError` on conflict
+
+Arguments
+
+- check_deleted (`bool`) - if True also look for conflicts in deleted
+  netixlans
+
+---
+#### validate_real_peer_vs_ghost_peer
+`def validate_real_peer_vs_ghost_peer(self)`
+
+If there are ip-address conflicts with another NetworkIXLan object
+try to resolve those conflicts if the new peer exists in the related
+exchange's IX-F data (real peer) and the old peer does not (ghost peer)
 
 ---
 
@@ -1525,13 +1768,27 @@ NetworkProtocolsDisabled(builtins.ValueError)
 ```
 
 Raised when a network has both ipv6 and ipv4 support
-disabled during ix-f import.
+disabled during IX-F import.
+
+
+## OAuthAccessTokenInfo
+
+```
+OAuthAccessTokenInfo(peeringdb_server.models.StripFieldMixin)
+```
+
+OAuth access token info
+
+Used to store additional information about an access token
+
+- amr: Authentication method reference set on the session that
+    created the grant that resulted in this access token
 
 
 ## OAuthApplication
 
 ```
-OAuthApplication(oauth2_provider.models.AbstractApplication)
+OAuthApplication(oauth2_provider.models.AbstractApplication, peeringdb_server.models.StripFieldMixin)
 ```
 
 OAuth application - extends the default oauth_provider2 application
@@ -1550,10 +1807,24 @@ have a special-case association with the field defined by NON_FIELD_ERRORS.
 
 ---
 
+## OAuthGrantInfo
+
+```
+OAuthGrantInfo(peeringdb_server.models.StripFieldMixin)
+```
+
+OAuth grant info
+
+Used to store additional information about a grant
+
+- amr: Authentication method reference set on the session that
+    created the grant
+
+
 ## Organization
 
 ```
-Organization(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.OrganizationBase, peeringdb_server.models.GeocodeBaseMixin)
+Organization(peeringdb_server.models.ProtectedMixin, django_peeringdb.models.abstract.OrganizationBase, peeringdb_server.models.GeocodeBaseMixin, peeringdb_server.models.SocialMediaMixin, peeringdb_server.models.StripFieldMixin, peeringdb_server.models.ParentStatusCheckMixin)
 ```
 
 Describes a peeringdb organization.
@@ -1569,6 +1840,8 @@ has no sponsorship ongoing or pending return None.
 - admin_url (`@property`): Return the admin URL for this organization (in /cp).
 - admin_usergroup (`@property`): Returns the admin usergroup for this organization.
 - all_users (`@property`): Returns a set of all users in the org's user and admin groups.
+- campus_set_active (`@property`): Returns queryset holding active campus in this organization.
+- carrier_set_active (`@property`): Returns queryset holding active carrier in this organization.
 - deletable (`@property`): Returns whether or not the organization is currently
 in a state where it can be marked as deleted.
 
@@ -1578,6 +1851,7 @@ of the following is True:
 - has a network under it with status=ok
 - has a facility under it with status=ok
 - has an exchange under it with status=ok
+- email_domains_list (`@property`): None
 - fac_set_active (`@property`): Returns queryset holding active facilities in this organization.
 - grainy_namespace (`@property`): None
 - grainy_namespace_manage (`@property`): Org administrators need CRUD to this namespace in order
@@ -1609,7 +1883,7 @@ owns.
 ### Class Methods
 
 #### create_from_rdap
-`def create_from_rdap(*args, **kwds)`
+`def create_from_rdap(cls, rdap, asn, org_name=None)`
 
 Creates organization from rdap result object.
 
@@ -1617,6 +1891,13 @@ Creates organization from rdap result object.
 
 ### Methods
 
+#### adjust_permissions_for_periodic_reauth
+`def adjust_permissions_for_periodic_reauth(self, user, perms)`
+
+Will strip users permission for the org if the org currently
+flags the user as needing re-authentication
+
+---
 #### delete_cleanup
 `def delete_cleanup(self, hard=False)`
 
@@ -1635,11 +1916,34 @@ during autocomplete lookup, make sure the objects
 are marked accordingly in the result.
 
 ---
+#### user_meets_email_requirements
+`def user_meets_email_requirements(self, user)`
+
+If organization has `restrict_user_emails` set to true
+this will check the specified user's email addresses against
+the values stored in `email_domains`.
+
+If the user has no email address that falls within the specified
+domain restrictions this will return `[]` and all associated user's email
+addresses in `List`.
+
+If the user has at least one email address that falls within the specified
+domain restrictions this will return all restricted email addresses in `List`
+and all associated user's email addresses in `List`.
+
+---
+#### user_requires_reauth
+`def user_requires_reauth(self, user)`
+
+Returns whether the specified user requires re-authentication according
+to this organizations's periodic_reauth settings.
+
+---
 
 ## OrganizationAPIKey
 
 ```
-OrganizationAPIKey(rest_framework_api_key.models.AbstractAPIKey)
+OrganizationAPIKey(rest_framework_api_key.models.AbstractAPIKey, peeringdb_server.models.StripFieldMixin)
 ```
 
 An API Key managed by an organization.
@@ -1648,7 +1952,7 @@ An API Key managed by an organization.
 ## OrganizationAPIPermission
 
 ```
-OrganizationAPIPermission(django_grainy.models.Permission)
+OrganizationAPIPermission(django_grainy.models.Permission, peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes permission for a OrganizationAPIKey.
@@ -1657,7 +1961,7 @@ Describes permission for a OrganizationAPIKey.
 ## OrganizationMerge
 
 ```
-OrganizationMerge(django.db.models.base.Model)
+OrganizationMerge(peeringdb_server.models.StripFieldMixin)
 ```
 
 When an organization is merged into another via admin.merge_organizations
@@ -1684,17 +1988,72 @@ Undo this merge.
 ## OrganizationMergeEntity
 
 ```
-OrganizationMergeEntity(django.db.models.base.Model)
+OrganizationMergeEntity(peeringdb_server.models.StripFieldMixin)
 ```
 
 This holds the entities moved during an
 organization merge stored in OrganizationMerge.
 
 
+## ParentStatusCheckMixin
+
+```
+ParentStatusCheckMixin(builtins.object)
+```
+
+Mixin that implements checks for creating
+/ updating an instance that will raise
+exception under certain criteria
+
+
+### Methods
+
+#### validate_parent_status
+`def validate_parent_status(self)`
+
+Validate parent status against object (child) status
+
+A child cannot be `ok` or `pending` if the parent is `deleted`
+A child cannot be `ok` if the parent is `pending`
+
+Will raise ParentStatus exception on invalid status.
+
+Can be disabled by setting `DATA_QUALITY_VALIDATE_PARENT_STATUS` to False
+
+:return:
+
+---
+#### validate_status_change
+`def validate_status_change(self)`
+
+Validate status changes:
+- Prevent changing from 'ok' to 'pending'
+
+---
+
+## ParentStatusException
+
+```
+ParentStatusException(builtins.OSError)
+```
+
+Throw this when an object cannot be created because its parent is
+either status pending or deleted.
+
+
+### Methods
+
+#### \__init__
+`def __init__(self, parent, typ)`
+
+Initialize self.  See help(type(self)) for accurate signature.
+
+---
+
 ## Partnership
 
 ```
-Partnership(django.db.models.base.Model)
+Partnership(peeringdb_server.models.StripFieldMixin)
 ```
 
 Allows an organization to be marked as a partner.
@@ -1762,10 +2121,33 @@ Override this in the class that uses this mixin (if needed).
 
 ---
 
+## SocialMediaMixin
+
+```
+SocialMediaMixin(django.db.models.base.Model)
+```
+
+Make subclasses preserve the alters_data attribute on overridden methods.
+
+
+### Methods
+
+#### save
+`def save(self, *args, **kwargs)`
+
+Save the current instance. Override this in a subclass if you want to
+control the saving process.
+
+The 'force_insert' and 'force_update' parameters can be used to insist
+that the "save" must be an SQL insert or update (or equivalent for
+non-SQL backends), respectively. Normally, they should not be set.
+
+---
+
 ## Sponsorship
 
 ```
-Sponsorship(django.db.models.base.Model)
+Sponsorship(peeringdb_server.models.StripFieldMixin)
 ```
 
 Allows an organization to be marked for sponsorship
@@ -1810,11 +2192,49 @@ Notification is only sent if notify_date < expiration_date
 ## SponsorshipOrganization
 
 ```
-SponsorshipOrganization(django.db.models.base.Model)
+SponsorshipOrganization(peeringdb_server.models.StripFieldMixin)
 ```
 
 Describes an organization->sponsorship relationship.
 
+
+## StripFieldMixin
+
+```
+StripFieldMixin(django.db.models.base.Model)
+```
+
+Mixin to remove whitespace at the beginning and end of string fields
+
+
+### Methods
+
+#### clean
+`def clean(self)`
+
+Hook for doing any extra model-wide validation after clean() has been
+called on every field by self.clean_fields. Any ValidationError raised
+by this method will not be associated with a particular field; it will
+have a special-case association with the field defined by NON_FIELD_ERRORS.
+
+---
+#### save
+`def save(self, *args, **kwargs)`
+
+Save the current instance. Override this in a subclass if you want to
+control the saving process.
+
+The 'force_insert' and 'force_update' parameters can be used to insist
+that the "save" must be an SQL insert or update (or equivalent for
+non-SQL backends), respectively. Normally, they should not be set.
+
+---
+#### strip_string_fields
+`def strip_string_fields(self)`
+
+Strip value in string fields
+
+---
 
 ## URLField
 
@@ -1846,7 +2266,7 @@ datetime -> timedelta showing offset from UTC, negative values indicating West o
 ## User
 
 ```
-User(django.contrib.auth.base_user.AbstractBaseUser, django.contrib.auth.models.PermissionsMixin)
+User(django.contrib.auth.base_user.AbstractBaseUser, django.contrib.auth.models.PermissionsMixin, peeringdb_server.models.StripFieldMixin)
 ```
 
 Proper length fields user.
@@ -1863,6 +2283,9 @@ the user has is lower than MAX_USER_AFFILIATION_REQUESTS
 - email_confirmed (`@property`): Returns True if the email specified by the user has
 been confirmed, False if not.
 - full_name (`@property`): None
+- get_2fa_security_keys (`@property`): None
+- get_passkey_security_keys (`@property`): None
+- has_2fa (`@property`): Returns true if the user has set up any TOTP or webauth security keys.
 - has_oauth (`@property`): None
 - is_verified_user (`@property`): Returns whether the user is verified (e.g., has been validated
 by PDB staff).
@@ -1873,13 +2296,29 @@ has been added to the 'user' user group.
 - organizations (`@property`): Returns all organizations this user is a member or admin of.
 - pending_affiliation_requests (`@property`): Returns the currently pending user -> org affiliation
 requests for this user.
+- self_entity_org (`@property`): None
 
 ### Methods
 
+#### close_account
+`def close_account(self)`
+
+Removes all identifying information from the User instance
+and flags it as inactive.
+
+Warning: users that are status == "pending" are hard-deleted
+
+---
 #### email_user
-`def email_user(self, subject, message, from_email=stefan@20c.com)`
+`def email_user(self, subject, message, from_email=stefan@20c.com, email=None)`
 
 Sends an email to this User.
+
+---
+#### email_user_all_addresses
+`def email_user_all_addresses(self, subject, message, from_email=stefan@20c.com, exclude=None)`
+
+Sends email to all email addresses for the user
 
 ---
 #### flush_affiliation_requests
@@ -1907,6 +2346,20 @@ Returns user preferred language.
 Returns the short name for the user.
 
 ---
+#### notify_email_added
+`def notify_email_added(self, email)`
+
+Notifies the user that the specified email address has been added
+to their account (#907)
+
+---
+#### notify_email_removed
+`def notify_email_removed(self, email)`
+
+Notifies the user that the specified email address has been removed
+from their account (#907)
+
+---
 #### password_reset_initiate
 `def password_reset_initiate(self)`
 
@@ -1931,7 +2384,7 @@ Used by grappelli autocomplete for representation.
 
 ---
 #### send_email_confirmation
-`def send_email_confirmation(self, request=None, signup=False)`
+`def send_email_confirmation(self, request=None, signup=False, email=None)`
 
 Use allauth email-confirmation process to make user
 confirm that the email they provided is theirs.
@@ -1975,7 +2428,7 @@ for email in rdap.emails:
 ## UserAPIKey
 
 ```
-UserAPIKey(rest_framework_api_key.models.AbstractAPIKey)
+UserAPIKey(rest_framework_api_key.models.AbstractAPIKey, peeringdb_server.models.StripFieldMixin)
 ```
 
 An API Key managed by a user. Can be readonly or can take on the
@@ -1985,7 +2438,7 @@ permissions of the User.
 ## UserOrgAffiliationRequest
 
 ```
-UserOrgAffiliationRequest(django.db.models.base.Model)
+UserOrgAffiliationRequest(peeringdb_server.models.StripFieldMixin)
 ```
 
 Whenever a user requests to be affiliated to an Organization
@@ -2038,10 +2491,20 @@ Sends a notification email to the requesting user.
 
 ---
 
+## UserOrgAffiliationRequestHistory
+
+```
+UserOrgAffiliationRequestHistory(reversion.models.Version, peeringdb_server.models.StripFieldMixin)
+```
+
+Proxy model for reversion Version to track changes in
+UserOrgAffiliationRequest objects in django-admin
+
+
 ## UserPasswordReset
 
 ```
-UserPasswordReset(django.db.models.base.Model)
+UserPasswordReset(peeringdb_server.models.StripFieldMixin)
 ```
 
 UserPasswordReset(user, token, created)
@@ -2053,7 +2516,7 @@ UserPasswordReset(user, token, created)
 ValidationErrorEncoder(json.encoder.JSONEncoder)
 ```
 
-Extensible JSON <http://json.org> encoder for Python data structures.
+Extensible JSON <https://json.org> encoder for Python data structures.
 
 Supports the following objects and types by default:
 
@@ -2101,14 +2564,14 @@ implement default like this::
         else:
             return list(iterable)
         # Let the base class default method raise the TypeError
-        return JSONEncoder.default(self, o)
+        return super().default(o)
 
 ---
 
 ## VerificationQueueItem
 
 ```
-VerificationQueueItem(django.db.models.base.Model)
+VerificationQueueItem(peeringdb_server.models.StripFieldMixin)
 ```
 
 Keeps track of new items created that need to be reviewed and approved
@@ -2140,7 +2603,7 @@ exception.
 ### Methods
 
 #### approve
-`def approve(*args, **kwds)`
+`def approve(self)`
 
 Approve the verification queue item.
 
